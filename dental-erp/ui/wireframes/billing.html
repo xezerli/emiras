@@ -1,0 +1,38 @@
+<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Billing · DentaCore</title><link rel="stylesheet" href="wireframes.css">
+<style>.methods{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.methods button{padding:14px 8px}.big{font-size:var(--fs-display);font-weight:700}
+.row{display:flex;justify-content:space-between;padding:4px 0}.pay{display:flex;gap:8px;align-items:center;margin:12px 0}</style></head><body>
+<main id="app">
+  <h1>Faktura <span class="sub">INV-2026-000412 · Aysel Qasımova</span> <span class="chip warn" id="st">Qismən ödənilib</span></h1>
+  <div class="grid g2">
+    <div class="card"><table><thead><tr><th>Xidmət</th><th>Diş</th><th>Say</th><th>Qiymət</th><th>Endirim</th><th style="text-align:right">Cəmi</th></tr></thead>
+      <tbody id="items"></tbody></table>
+      <div class="row" style="margin-top:12px"><span class="sub">Promo kod</span><span><input aria-label="Promo kod" placeholder="SUMMER10" style="padding:6px 10px;border-radius:8px;border:1px solid var(--md-outline);background:transparent;color:inherit"> <button class="btn tonal">Tətbiq et</button></span></div>
+      <div class="note">Sığorta: ADB 80% → sığorta hissəsi ayrıca claim-ə düşür (Faza 3). Faza 1-də məbləğ əl ilə daxil edilir.</div></div>
+    <div class="card"><div class="row"><span>Cəmi</span><b id="tot"></b></div><div class="row"><span>Sığorta</span><b id="ins"></b></div>
+      <div class="row"><span>Ödənilib</span><b id="paid"></b></div><hr style="border:0;border-top:1px solid var(--md-outline-variant)">
+      <div class="row"><span>Qalıq borc</span><span class="big" id="bal"></span></div>
+      <div class="pay"><input id="amt" type="number" min="0.01" step="0.01" aria-label="Ödəniş məbləği" style="flex:1;padding:12px;border-radius:12px;border:1px solid var(--md-outline);background:transparent;color:inherit;font-size:18px">
+        <button class="btn outline" id="full">Tam</button></div>
+      <div class="methods" id="m"></div><div id="err" class="sub down" role="alert" style="min-height:20px;margin-top:8px"></div>
+      <button class="btn" id="pay" style="width:100%;padding:14px">Ödənişi qəbul et</button>
+      <div class="note">Smen açıq deyilsə nağd/POS düyməsi deaktivdir. Ödəniş dəyişməzdir; səhv varsa «Geri qaytar» (limit və icazə ilə).</div></div>
+  </div>
+</main><script src="shared.js"></script><script>
+mountShell('Billing / POS');
+const items=[['Plomb (kompozit)',36,1,180,0],['Rentgen (nöqtəvi)',36,1,25,0],['Anesteziya',36,1,15,5]];
+const total=items.reduce((s,[,,q,p,d])=>s+q*p-d,0), ins=total*0.8-20; let paid=20, method='cash';
+const M={cash:'💵 Nağd',card:'💳 Kart',pos:'🧾 POS',transfer:'🏦 Köçürmə',gift_card:'🎁 Hədiyyə kartı',installment:'📆 Taksit'};
+const f=n=>n.toFixed(2)+' ₼', el=id=>document.getElementById(id);
+el('items').innerHTML=items.map(([n,t,q,p,d])=>`<tr><td>${n}</td><td>${t}</td><td>${q}</td><td>${f(p)}</td><td>${f(d)}</td><td style="text-align:right">${f(q*p-d)}</td></tr>`).join('');
+el('m').innerHTML=Object.entries(M).map(([k,l])=>`<button class="btn ${k===method?'':'tonal'}" data-k="${k}">${l}</button>`).join('');
+el('m').onclick=e=>{const k=e.target.closest('button')?.dataset.k;if(!k)return;method=k;[...el('m').children].forEach(b=>b.classList.toggle('tonal',b.dataset.k!==k))};
+function render(){const bal=Math.max(0,total-ins-paid);el('tot').textContent=f(total);el('ins').textContent=f(ins);el('paid').textContent=f(paid);el('bal').textContent=f(bal);
+ el('amt').value=bal.toFixed(2);const s=el('st');s.textContent=bal===0?'Ödənilib':'Qismən ödənilib';s.className='chip '+(bal===0?'ok':'warn')}
+el('full').onclick=()=>{el('amt').value=Math.max(0,total-ins-paid).toFixed(2)};
+el('pay').onclick=()=>{const a=parseFloat(el('amt').value),bal=total-ins-paid;
+ if(!(a>0))return el('err').textContent='Məbləğ daxil edin';
+ if(a>bal+1e-9)return el('err').textContent=`Məbləğ qalıq borcu (${f(bal)}) aşır, artığı avans kimi qeyd edin`; // billing.overpayment
+ el('err').textContent='';paid+=a;render()};
+render();
+</script></body></html>
