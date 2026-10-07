@@ -187,6 +187,7 @@ FROM invoices WHERE status IN ('issued','partially_paid') GROUP BY patient_id HA
 | `db/migrations/tenant/T006_billing.sql` | Qiymət, invoice, ödəniş, kassa, taksit, gift card, promo |
 | `db/migrations/tenant/T007_patient_permissions.sql` | `patient:read_sensitive` icazəsi (Mərhələ 7, Dilim 2) |
 | `db/migrations/tenant/T008_clinical.sql` | Prosedur kataloqu, resept override `CHECK`, bir açıq vizit və bir aktual diş qeydi unikal indeksləri, plan bəndi `row_version` (Dilim 4) |
+| `db/migrations/tenant/T009_outbox_retry.sql` | `outbox_messages.next_attempt_at` (exponential backoff), gözləyən/işlənmiş sətirlər üçün indekslər (Dilim 5a) |
 | `db/provision.sh` | Tenant sxemi yaradır (idempotent platform, ayrı tranzaksiya hər fayl) |
 | `db/tests.sql` | Davranış testləri (double-booking, immutability, versioning) |
 

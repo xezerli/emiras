@@ -129,6 +129,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DentaCore.ClinicCore.Integr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DentaCore.Clinical.UnitTests", "tests\DentaCore.Clinical.UnitTests\DentaCore.Clinical.UnitTests.csproj", "{28D502E2-FA13-4812-ABA3-16C1221BFFDD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DentaCore.Workers.IntegrationTests", "tests\DentaCore.Workers.IntegrationTests\DentaCore.Workers.IntegrationTests.csproj", "{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -739,6 +741,18 @@ Global
 		{28D502E2-FA13-4812-ABA3-16C1221BFFDD}.Release|x64.Build.0 = Release|Any CPU
 		{28D502E2-FA13-4812-ABA3-16C1221BFFDD}.Release|x86.ActiveCfg = Release|Any CPU
 		{28D502E2-FA13-4812-ABA3-16C1221BFFDD}.Release|x86.Build.0 = Release|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Debug|x64.Build.0 = Debug|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Debug|x86.Build.0 = Debug|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Release|x64.ActiveCfg = Release|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Release|x64.Build.0 = Release|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Release|x86.ActiveCfg = Release|Any CPU
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -805,5 +819,6 @@ Global
 		{BB94DCC2-6492-4427-821F-EAD28E5501A1} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{3CE1145D-6FA8-464E-8791-B8B3C50F6459} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{28D502E2-FA13-4812-ABA3-16C1221BFFDD} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{1C5B9D31-97C9-49FC-BD1F-26FCE884B851} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

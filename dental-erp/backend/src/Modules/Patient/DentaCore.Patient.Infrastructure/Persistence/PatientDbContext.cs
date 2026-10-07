@@ -44,7 +44,7 @@ public sealed class PatientDbContext(DbContextOptions<PatientDbContext> options)
             b.Property(x => x.MarketingOptIn).HasColumnName("marketing_opt_in");
             b.Property(x => x.ReferralSource).HasColumnName("referral_source");
             b.Property(x => x.Notes).HasColumnName("notes");
-            b.Property(x => x.NoShowCount).HasColumnName("no_show_count").ValueGeneratedOnAdd();
+            b.Property(x => x.NoShowCount).HasColumnName("no_show_count");
             b.Property(x => x.RiskScore).HasColumnName("risk_score").ValueGeneratedOnAdd();
             b.Property(x => x.Status).HasColumnName("status").ValueGeneratedOnAdd();
             b.Property(x => x.CreatedBy).HasColumnName("created_by");

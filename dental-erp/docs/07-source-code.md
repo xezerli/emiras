@@ -8,8 +8,9 @@
 | 2 | Patient (qeydiyyat, axtarış, tibbi profil) + RBAC scope + hash-chain audit | ✅ Tamamlandı |
 | 3 | Scheduling (qəbul, double-booking, boş slotlar, növbə, no-show, xatırlatma planı) | ✅ Tamamlandı |
 | 4 | Clinical (vizit, odontoqram tarixçəsi, müalicə planı, resept allergiya yoxlaması ilə, imzalanan qeyd) | ✅ Tamamlandı |
-| 5 | Billing (faktura, ödəniş, kassa smeni, refund) + vizit→faktura saga | |
-| 6 | Audit, Outbox publisher (RabbitMQ), Notify (SignalR), Gateway (YARP) | |
+| 5a | Mesajlaşma: Outbox publisher + inbox + consumer host (RabbitMQ), no-show consumer, tenant maintenance | ✅ Tamamlandı |
+| 5b | Billing (faktura, ödəniş, kassa smeni, refund) + vizit→faktura saga | |
+| 6 | Audit publisher, Notify (SignalR), Gateway (YARP) | |
 | 7 | Dashboard, Sync, Elasticsearch indexer | |
 | 8 | Frontend (Next.js): Design System, auth, əsas ekranlar | |
 
@@ -295,4 +296,66 @@ Clinical inteqrasiya testləri (20): qəbuldan vizit və status keçidləri, 6 p
 - **Prosedurun materialları (stok)** hələ yoxdur, Inventory modulu Faza 2-dədir.
 - Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, audit partition job-u, Idempotency-Key, Testcontainers) qüvvədə qalır.
 
-> Növbəti dilim: **Billing** (qiymət siyahısı, faktura, qismən ödəniş, kassa smeni, geri qaytarma, `ProcedurePerformed`/`VisitClosed` hadisələrindən invoice qaralaması). Əvvəlcə **RabbitMQ publisher və inbox** (Dilim 6-nın bir hissəsi) lazım ola bilər, çünki Billing hadisələri istehlak edir. Davam etmək üçün **"Davam et"** yazın.
+> Növbəti dilim: **Dilim 5a** (aşağıda, RabbitMQ), sonra **Billing**. Davam etmək üçün **"Davam et"** yazın.
+
+---
+
+## Dilim 5a: Mesajlaşma (RabbitMQ publisher, inbox, consumer)
+
+### Nə yazıldı
+
+| Hissə | Fayl (`BuildingBlocks.Infrastructure/Messaging`) | Rolu |
+|---|---|---|
+| Zərf və müqavilələr | `Messaging.cs` | `IntegrationEnvelope` (id, type, version, tenantId, tenantSlug, routingKey, payload), `[Consumes]`, `IIntegrationConsumer`, `RabbitMqOptions` |
+| Publisher | `RabbitMqPublisher.cs` | Bir kanal, publisher confirms, kəsilmədə təkrar qoşulma, persistent mesaj, `MessageId = outbox id` |
+| Outbox processor | `OutboxProcessor.cs` | Hər tenant üçün `FOR UPDATE SKIP LOCKED` ilə paket götürür, göndərir, `processed_at` yazır; xətada `attempts+1` və exponential `next_attempt_at` (5 san · 2^cəhd, max 1 saat) |
+| Inbox | `Inbox.cs` | `ExecuteOnceAsync`: inbox sətri + consumer təsiri EYNİ tranzaksiyada |
+| Consumer host | `ConsumerHost.cs` | Topologiya (topic exchange `dental.events`, `dental.dead`, növbə `<prefix>.<ad>` + `.dlq`), prefetch, yerli təkrar cəhdlər, sonra DLQ |
+| Maintenance | `Maintenance.cs` | Saatlıq: audit partition-ları (cari + 2 ay), işlənmiş outbox (7 gün), köhnə refresh token və change_log təmizliyi |
+| Miqrasiya | `db/migrations/tenant/T009_outbox_retry.sql` | `outbox_messages.next_attempt_at` + indekslər |
+| İlk consumer | `Patient.Infrastructure/NoShowConsumer.cs` | `scheduling.appointment-missed` → `patients.no_show_count + 1` (atomik SQL) |
+| Müqavilə | `Scheduling.Contracts/IntegrationEvents.cs` | `AppointmentMissedV1`: Patient modulu Scheduling.Domain-ə istinad etmir |
+| Host | `DentaCore.Workers/Program.cs` | Patient modulu, messaging, consumer-lər, publisher, maintenance |
+
+### Əsas qərarlar
+
+- **At-least-once + inbox = effektiv bir dəfə.** Broker və outbox təkrar çatdıra bilər; inbox `(message_id, consumer)` PK-sı dublikatı atır. Inbox və təsir bir tranzaksiyadadır: proses ortada ölərsə hər ikisi geri qaytarılır.
+- **Göndərmə outbox tranzaksiyası daxilindədir.** Commit-dən əvvəl proses ölərsə mesaj təkrar göndərilir (dublikat, itki yox). Əksinə sıra (əvvəl commit, sonra göndər) mesajı itirərdi.
+- **`SKIP LOCKED`** bir neçə Workers nüsxəsinin eyni sətri iki dəfə götürməməsini təmin edir və horizontal miqyaslanmanı açır.
+- **Routing key tenant-sızdır, tenant zərfdədir.** Bir növbə bütün tenant-lara xidmət edir (10 000 tenant üçün 10 000 növbə olmur). Consumer tenant-ı `platform.tenants`-dan slug ilə tapır və scope-u həmin tenant-a bağlayır.
+- **Topologiyanı consumer host elan edir və publisher-dən ƏVVƏL qalxır.** Subscriber-i olmayan routing key-ə göndərilən mesaj broker-də itir; növbə əvvəlcədən bağlı olmalıdır.
+- **Zəhərli mesajlar itmir.** Oxunmayan JSON dərhal, tənzimlənən sayda uğursuz cəhddən sonra isə işlənə bilməyən mesaj DLQ-ya düşür (`dental.dead`), orada araşdırılır.
+- **No-show artırması atomik SQL-dir** (`no_show_count = no_show_count + 1`), oxu-dəyiş-yaz deyil: pasiyent kartının paralel redaktəsi ilə konkurensiya istisnası yaranmır. `NoShowCount` EF mapping-indən `ValueGeneratedOnAdd` çıxarıldı ki, domen dəyəri DB default-u ilə qarışmasın.
+- **Müqavilə testi:** Scheduling domen hadisəsinin real JSON-u `AppointmentMissedV1`-ə oxunur; sahə adı dəyişərsə test qırılır.
+
+### Testlər (373 test, hamısı keçir)
+
+Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real RabbitMQ** ilə işləyir (`DENTACORE_TEST_PG` və `DENTACORE_TEST_AMQP` təyin olunmayıbsa atlanır). Hər işə salma unikal exchange/növbə prefiksi alır və sonda təmizləyir.
+
+| Test | Nəyi sübut edir |
+|---|---|
+| Outbox → broker | Zərfin bütün sahələri (id, type, tenant, routing key, payload), `MessageId`, persistent; `processed_at` yazılır |
+| Uğursuz göndərmə | `attempts`, `last_error`, `next_attempt_at` gələcəkdə; backoff müddətində cəhd yoxdur; vaxt çatanda göndərilir və xəta təmizlənir |
+| Max cəhd | Limitə çatmış sətir toxunulmaz qalır |
+| Paralel processor-lar | 30 mesaj, iki processor: hər mesaj tam bir dəfə, hər iki processor iş görür |
+| No-show consumer | Outbox-dan gələn mesaj sayı 1 edir; eyni mesaj broker-də iki dəfə təkrar çatdırılanda say artmır; fərqli mesaj sayılır |
+| DLQ | JSON olmayan mesaj və tanınmayan tenant-lı mesaj `patient.no-show.dlq`-ya düşür |
+| Müqavilə uyğunluğu | Domen hadisəsi JSON-u `AppointmentMissedV1`-ə düzgün oxunur |
+| Maintenance | Audit partition-ları 2 ay irəli yaranır və təkrar işə salma idempotentdir |
+
+**Mutasiya yoxlaması:** `NoShowConsumer`-dən inbox çıxarılanda duplicate testi qırılır (say 2-dən çox olur); kod bərpa olundu.
+
+### Testin tapdığı səhv (test tərəfində)
+
+- Partition yoxlaması `pg_class` ilə tenant sxemlərini qarışdırırdı (`t_demo` və `t_other` eyni ad). `to_regclass` ilə (search_path-ə uyğun) əvəz olundu.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Yalnız bir consumer var** (no-show). Billing, Notify, Search indexer növbəti dilimlərdə eyni mexanizmi istifadə edəcək.
+- **Risk skoru (AI) yenilənmir**, yalnız `no_show_count`.
+- **Broker əlçatmaz olarkən Workers açılışı** consumer host-da istisna atır və host dayanır (orkestrator yenidən başladır). Daha yumşaq yenidən qoşulma gələcək işdir. Publisher isə mesajı outbox-da saxlayıb təkrar cəhd edir.
+- **Maksimum cəhdi aşmış outbox sətirləri** avtomatik xəbərdarlıq yaratmır; monitorinq qaydası (Mərhələ 9, Prometheus) lazımdır.
+- **Outbox sorğusu hər tenant üçün ardıcıl işləyir.** Minlərlə tenant üçün tenant-ları paralelləşdirmək və ya LISTEN/NOTIFY ilə oyatmaq optimallaşdırmasıdır.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Idempotency-Key, Testcontainers) qüvvədə qalır; **audit partition job-u və no-show consumer məhdudiyyətləri bu dilimlə bağlandı.**
+
+> Növbəti dilim: **5b Billing** (qiymət siyahısı, faktura, qismən ödəniş, kassa smeni, geri qaytarma, `ProcedurePerformed`/`VisitClosed` hadisələrindən invoice qaralaması). Davam etmək üçün **"Davam et"** yazın.

@@ -1,5 +1,6 @@
 using DentaCore.BuildingBlocks.Application;
 using DentaCore.BuildingBlocks.Infrastructure.Auth;
+using DentaCore.BuildingBlocks.Infrastructure.Messaging;
 using DentaCore.BuildingBlocks.Infrastructure.Outbox;
 using DentaCore.BuildingBlocks.Infrastructure.Security;
 using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
@@ -43,6 +44,14 @@ public static class DependencyInjection
         services.AddScoped<PatientAccess>();
         services.AddScoped<IPatientDirectory, PatientDirectory>();
         services.TryAddScoped<ICareRelationships, NoCareRelationships>();   // Scheduling modulu qoşulubsa əvəz olunur
+        return services;
+    }
+
+    /// <summary>Workers host-u çağırır: Patient modulunun mesaj consumer-ləri.</summary>
+    public static IServiceCollection AddPatientIntegrationConsumers(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddIntegrationConsumer<NoShowConsumer>();
         return services;
     }
 }
