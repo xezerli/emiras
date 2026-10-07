@@ -14,6 +14,15 @@ internal sealed class PatientDirectory(PatientDbContext db) : IPatientDirectory
             .Select(p => new PatientRef(p.Id, p.BranchId, p.CreatedBy, p.LastName + " " + p.FirstName, p.PreferredChannel))
             .FirstOrDefaultAsync(cancellationToken);
 
+    public async Task<IReadOnlyList<AllergyRef>> GetActiveAllergiesAsync(Guid patientId, CancellationToken cancellationToken)
+    {
+        var rows = await db.Allergies
+            .Where(a => a.PatientId == patientId && a.IsActive)
+            .Select(a => new { a.Substance, a.Severity })
+            .ToListAsync(cancellationToken);
+        return rows.Select(r => new AllergyRef(r.Substance, r.Severity.ToString().ToLowerInvariant())).ToList();
+    }
+
     public async Task<IReadOnlyDictionary<Guid, string>> GetNamesAsync(IReadOnlyCollection<Guid> patientIds, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(patientIds);

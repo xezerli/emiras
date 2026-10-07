@@ -35,3 +35,44 @@ internal sealed class SchedulingRepository(SchedulingDbContext db) : IScheduling
             $"UPDATE appointment_reminders SET status = 'cancelled' WHERE appointment_id = {appointmentId} AND status = 'pending'",
             cancellationToken);
 }
+
+/// <summary>Clinical modulunun çağırdığı kontrakt: qəbul statusunu vizitlə sinxronlaşdırır.</summary>
+internal sealed class AppointmentLifecycle(SchedulingDbContext db, DentaCore.BuildingBlocks.Application.IClock clock) : Contracts.IAppointmentLifecycle
+{
+    public async Task<Contracts.LifecycleOutcome> StartAsync(Guid appointmentId, Guid providerId, Guid patientId, CancellationToken cancellationToken)
+    {
+        var appointment = await db.Appointments.FirstOrDefaultAsync(a => a.Id == appointmentId, cancellationToken);
+        if (appointment is null || appointment.PatientId != patientId || appointment.ProviderId != providerId)
+        {
+            // Başqa pasiyentin/həkimin qəbulunu vizitə bağlamaq olmaz. Mövcudluq sızmasın deyə eyni cavab
+            return Contracts.LifecycleOutcome.Fail("visit.appointment_mismatch", "The appointment does not belong to this patient and provider.");
+        }
+
+        var result = appointment.Start(clock.UtcNow);
+        if (result.IsFailure)
+        {
+            return Contracts.LifecycleOutcome.Fail(result.Error!.Code, result.Error.Message);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return new Contracts.LifecycleOutcome(true, BranchId: appointment.BranchId);
+    }
+
+    public async Task<Contracts.LifecycleOutcome> CompleteAsync(Guid appointmentId, CancellationToken cancellationToken)
+    {
+        var appointment = await db.Appointments.FirstOrDefaultAsync(a => a.Id == appointmentId, cancellationToken);
+        if (appointment is null)
+        {
+            return Contracts.LifecycleOutcome.Fail("appointment.not_found", "Appointment not found.");
+        }
+
+        var result = appointment.Complete();
+        if (result.IsFailure)
+        {
+            return Contracts.LifecycleOutcome.Fail(result.Error!.Code, result.Error.Message);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Contracts.LifecycleOutcome.Ok;
+    }
+}

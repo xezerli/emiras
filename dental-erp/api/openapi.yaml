@@ -351,7 +351,7 @@ paths:
     post:
       operationId: postVisits
       tags: [Clinical]
-      summary: Vizitə başla (qəbuldan və ya walk-in)
+      summary: Vizitə başla (qəbuldan və ya walk-in). Qəbul həkimə və pasiyentə aid olmalıdır, statusu in_progress olur. Eyni pasiyent üçün ikinci açıq vizit 409 visit.already_open
       x-permission: clinical:write
       requestBody:
         required: true
@@ -612,6 +612,97 @@ paths:
         - { $ref: '#/components/parameters/Cursor' }
       responses: { '200': { description: OK } }
 
+  /patients/{patientId}/visits:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsVisitsByPatient
+      tags: [Clinical]
+      summary: Pasiyentin vizitləri
+      x-permission: clinical:read
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Visit' } } } } } }
+  /patients/{patientId}/odontogram/{fdi}/history:
+    parameters:
+      - { $ref: '#/components/parameters/PatientId' }
+      - { name: fdi, in: path, required: true, schema: { type: integer }, description: FDI diş nömrəsi }
+    get:
+      operationId: getPatientsOdontogramHistoryByPatient
+      tags: [Clinical]
+      summary: Dişin tam tarixçəsi (əvəz olunmuş qeydlər daxil, heç nə silinmir)
+      x-permission: clinical:read
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ToothRecord' } } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /treatment-plans/{planId}:
+    get:
+      operationId: getTreatmentPlansByPlan
+      tags: [Clinical]
+      summary: Müalicə planı
+      x-permission: clinical:read
+      parameters: [ { name: planId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TreatmentPlan' } } } } }
+  /treatment-plans/{planId}/propose:
+    post:
+      operationId: postTreatmentPlansProposeByPlan
+      tags: [Clinical]
+      summary: Qaralamanı pasiyentə təklif et (draft → proposed)
+      x-permission: clinical:write
+      parameters: [ { name: planId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TreatmentPlan' } } } }, '409': { $ref: '#/components/responses/Problem' } }
+  /treatment-plans/{planId}/reject:
+    post:
+      operationId: postTreatmentPlansRejectByPlan
+      tags: [Clinical]
+      summary: Pasiyent planı rədd etdi (proposed → rejected)
+      x-permission: clinical:write
+      parameters: [ { name: planId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TreatmentPlan' } } } }, '409': { $ref: '#/components/responses/Problem' } }
+  /treatment-plans/{planId}/cancel:
+    post:
+      operationId: postTreatmentPlansCancelByPlan
+      tags: [Clinical]
+      summary: Planı ləğv et. İcra olunmuş bəndlər qalır, qalanları ləğv olunur
+      x-permission: clinical:write
+      parameters: [ { name: planId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TreatmentPlan' } } } }, '409': { $ref: '#/components/responses/Problem' } }
+  /clinical-notes/{noteId}:
+    put:
+      operationId: putClinicalNotesByNote
+      tags: [Clinical]
+      summary: Qaralama qeydini dəyiş (yalnız müəllif, imzalanmamış)
+      x-permission: clinical:write
+      parameters: [ { name: noteId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { subjective: { type: string }, objective: { type: string }, assessment: { type: string }, plan: { type: string } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ClinicalNote' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { description: İmzalanmış qeyd dəyişdirilə bilməz (clinical.note_signed), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /patients/{patientId}/clinical-notes:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsClinicalNotesByPatient
+      tags: [Clinical]
+      summary: Klinik qeydlər. Qaralamalar yalnız müəllifə görünür, imzalananlar hər klinisistə
+      x-permission: clinical:read
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ClinicalNote' } } } } } }
+  /patients/{patientId}/prescriptions:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsPrescriptionsByPatient
+      tags: [Clinical]
+      summary: Reseptlər
+      x-permission: clinical:read
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Prescription' } } } } } }
+  /procedure-codes:
+    get:
+      operationId: getProcedureCodes
+      tags: [Clinical]
+      summary: Prosedur kataloqu (CDT əsaslı). Plan bəndləri yalnız buradakı kodlarla yaradıla bilər
+      x-permission: clinical:read
+      parameters: [ { name: q, in: query, schema: { type: string } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ProcedureCode' } } } } } }
+
 components:
   securitySchemes:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
@@ -868,6 +959,25 @@ components:
         source: { type: string, enum: [typed, voice, ai_draft] }
         addendumOf: { type: string, format: uuid }
         signedAt: { type: [string, 'null'], format: date-time }
+    Prescription:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        visitId: { type: [string, 'null'], format: uuid }
+        providerId: { type: string, format: uuid }
+        issuedAt: { type: string, format: date-time }
+        items: { type: array, items: { type: object, properties: { drug: { type: string }, dose: { type: string }, frequency: { type: string }, days: { type: integer }, notes: { type: string } } } }
+        allergyCheckPassed: { type: boolean, description: false = allergiya xəbərdarlığı səbəblə keçilib }
+        overrideReason: { type: [string, 'null'] }
+    ProcedureCode:
+      type: object
+      properties:
+        code: { type: string, examples: [D2391] }
+        name: { type: string }
+        category: { type: string }
+        requiresTooth: { type: boolean }
+        defaultDurationMin: { type: integer }
     PrescriptionCreate:
       type: object
       required: [patientId, items]

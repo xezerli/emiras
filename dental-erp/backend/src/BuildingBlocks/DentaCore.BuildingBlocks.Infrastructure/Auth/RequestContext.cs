@@ -89,7 +89,10 @@ internal sealed class ConfigurePublicKeyJwtBearer(IOptions<JwtValidationOptions>
     public void Configure(JwtBearerOptions o) => Configure(Options.DefaultName, o);
 }
 
-/// <summary>EF optimistic concurrency toqquşmasını RFC 9457 412 cavabına çevirir.</summary>
+/// <summary>
+/// Gözlənilməz DB toqquşmalarını 500 əvəzinə düzgün cavaba çevirir (RFC 9457): EF optimistic concurrency → 412,
+/// handler-in tutmadığı constraint pozuntusu → 409. Gözlənilən hallar handler-lərdə konkret xəta koduyla həll olunur.
+/// </summary>
 public sealed class ConcurrencyExceptionMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(HttpContext context)
@@ -98,6 +101,16 @@ public sealed class ConcurrencyExceptionMiddleware(RequestDelegate next)
         try
         {
             await next(context);
+        }
+        catch (DentaCore.BuildingBlocks.Application.ConstraintViolationException) when (!context.Response.HasStarted)
+        {
+            context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsJsonAsync(
+                new { type = "https://errors.dentacore.app/conflict.constraint_violation", title = "The change conflicts with existing data", status = 409, code = "conflict.constraint_violation" },
+                options: null,
+                contentType: "application/problem+json",
+                cancellationToken: context.RequestAborted);
         }
         catch (DbUpdateConcurrencyException) when (!context.Response.HasStarted)
         {

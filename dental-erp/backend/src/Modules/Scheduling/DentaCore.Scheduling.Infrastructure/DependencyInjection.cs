@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<ISchedulingUnitOfWork>(sp => sp.GetRequiredService<SchedulingDbContext>());
         services.AddScoped<IModuleUnitOfWork>(sp => sp.GetRequiredService<SchedulingDbContext>());
         services.AddScoped<ISchedulingRepository, SchedulingRepository>();
+        services.AddScoped<IAppointmentLifecycle, AppointmentLifecycle>();
         services.AddScoped<SchedulingReadModel>();
         services.AddScoped<ISchedulingReadModel>(sp => sp.GetRequiredService<SchedulingReadModel>());
 

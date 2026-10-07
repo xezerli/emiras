@@ -143,6 +143,40 @@ public class AppointmentDomainTests
     }
 
     [Fact]
+    public void Visit_start_moves_to_in_progress_from_booked_or_checked_in_and_completion_only_from_in_progress()
+    {
+        var booked = Booked(30);
+        Assert.Equal("appointment.invalid_state", booked.Complete().Error!.Code);
+        Assert.True(booked.Start(Now).IsSuccess);   // gəlişi qeyd olunmamış, amma həkimin yanındadır
+        Assert.Equal(AppointmentStatus.InProgress, booked.Status);
+        Assert.Equal(Now, booked.CheckedInAt);
+        Assert.True(booked.HoldsSlot);
+        Assert.Equal("appointment.invalid_state", booked.Start(Now).Error!.Code);
+
+        Assert.True(booked.Complete().IsSuccess);
+        Assert.Equal(AppointmentStatus.Completed, booked.Status);
+        Assert.False(booked.HoldsSlot);   // tamamlanmış qəbul slotu buraxır
+        Assert.Equal("appointment.invalid_state", booked.Complete().Error!.Code);
+
+        var checkedIn = Booked(30);
+        checkedIn.CheckIn(Now);
+        Assert.True(checkedIn.Start(Now.AddMinutes(1)).IsSuccess);
+        Assert.Equal(Now, checkedIn.CheckedInAt);   // əsl gəliş vaxtı saxlanır
+    }
+
+    [Fact]
+    public void Cancelled_or_missed_appointments_cannot_start_a_visit()
+    {
+        var cancelled = Booked();
+        cancelled.Cancel(null, Now);
+        var missed = Booked(30);
+        missed.MarkNoShow(Now.AddMinutes(31));
+
+        Assert.Equal("appointment.invalid_state", cancelled.Start(Now).Error!.Code);
+        Assert.Equal("appointment.invalid_state", missed.Start(Now).Error!.Code);
+    }
+
+    [Fact]
     public void Queue_ticket_can_only_be_called_once()
     {
         var t = QueueTicket.Issue(Guid.NewGuid(), Branch, Guid.NewGuid(), Patient, 1, new DateOnly(2026, 10, 7), Now);

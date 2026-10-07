@@ -185,6 +185,34 @@ public sealed class Appointment : AggregateRoot<Guid>
         return Result.Success();
     }
 
+    /// <summary>Vizit başlayır. Qəbul gəlməmiş (booked/confirmed) də başlana bilər: gəlişi qeyd olunmamış, amma həkimin yanındadır.</summary>
+    public Result Start(DateTimeOffset now)
+    {
+        if (Status is not (AppointmentStatus.Booked or AppointmentStatus.Confirmed or AppointmentStatus.CheckedIn))
+        {
+            return Error.Conflict("appointment.invalid_state", $"Cannot start a visit for an appointment in status '{Status}'.");
+        }
+
+        if (Status != AppointmentStatus.CheckedIn)
+        {
+            CheckedInAt = now;
+        }
+
+        Status = AppointmentStatus.InProgress;
+        return Result.Success();
+    }
+
+    public Result Complete()
+    {
+        if (Status != AppointmentStatus.InProgress)
+        {
+            return Error.Conflict("appointment.invalid_state", $"Cannot complete an appointment in status '{Status}'.");
+        }
+
+        Status = AppointmentStatus.Completed;
+        return Result.Success();
+    }
+
     public Result Cancel(string? reason, DateTimeOffset now)
     {
         if (Status is not (AppointmentStatus.Booked or AppointmentStatus.Confirmed or AppointmentStatus.CheckedIn))

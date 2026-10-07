@@ -110,6 +110,8 @@ internal sealed class FakePatients : IPatientDirectory
 
     public Task<PatientRef?> FindAsync(Guid patientId, CancellationToken cancellationToken) => Task.FromResult(Items.GetValueOrDefault(patientId));
 
+    public Task<IReadOnlyList<AllergyRef>> GetActiveAllergiesAsync(Guid patientId, CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<AllergyRef>>([]);
+
     public Task<IReadOnlyDictionary<Guid, string>> GetNamesAsync(IReadOnlyCollection<Guid> patientIds, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyDictionary<Guid, string>>(Items.Where(i => patientIds.Contains(i.Key)).ToDictionary(i => i.Key, i => i.Value.FullName));
 }

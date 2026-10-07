@@ -7,7 +7,7 @@
 | 1 | BuildingBlocks + Identity (login, JWT, refresh rotasiyası, tenant həlli, outbox) | ✅ Tamamlandı |
 | 2 | Patient (qeydiyyat, axtarış, tibbi profil) + RBAC scope + hash-chain audit | ✅ Tamamlandı |
 | 3 | Scheduling (qəbul, double-booking, boş slotlar, növbə, no-show, xatırlatma planı) | ✅ Tamamlandı |
-| 4 | Clinical (vizit, odontoqram, plan, resept, qeyd) | |
+| 4 | Clinical (vizit, odontoqram tarixçəsi, müalicə planı, resept allergiya yoxlaması ilə, imzalanan qeyd) | ✅ Tamamlandı |
 | 5 | Billing (faktura, ödəniş, kassa smeni, refund) + vizit→faktura saga | |
 | 6 | Audit, Outbox publisher (RabbitMQ), Notify (SignalR), Gateway (YARP) | |
 | 7 | Dashboard, Sync, Elasticsearch indexer | |
@@ -225,4 +225,74 @@ Scheduling unit testləri: domen status maşını və pəncərə sərhədləri, 
 - **`start`/`complete` statusları** Clinical dilimində vizitlə birgə gələcək.
 - Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, audit partition job-u, Idempotency-Key, Testcontainers) qüvvədə qalır.
 
-> Növbəti dilim: **Clinical** (vizit, interaktiv odontoqram qeydləri tarixçə ilə, müalicə planı, resept allergiya yoxlaması ilə, imzalanan klinik qeyd). Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 4: Clinical
+
+### Nə yazıldı
+
+**Domen (`Clinical.Domain`):**
+- `Visit`: açıq/bağlı, `VisitStarted` və `VisitClosed` hadisələri.
+- `ToothRecord` (odontoqram): FDI validasiyası (11–48, 51–85), səth, vəziyyət. Yeni qeyd köhnəni əvəz edir (`superseded_at`), heç nə silinmir.
+- `TreatmentPlan` + `PlanItem`: `draft → proposed → accepted → in_progress → completed`, həmçinin `rejected`/`cancelled`. Sətir cəmi: say × qiymət × (1 − endirim%), bank yuvarlaqlaşdırması.
+- `Prescription` (dəyişməz) və `AllergyChecker`.
+- `ClinicalNote` (SOAP): qaralama → imza → dəyişməz, düzəliş addendum ilə.
+
+**Endpoint-lər (`ClinicCore.Api`):** `/v1/visits` (+`/close`), `/v1/patients/{id}/odontogram` (GET, POST, `/{fdi}/history`, `?at=` ilə time travel), `/v1/patients/{id}/treatment-plans`, `/v1/treatment-plans/{id}` (+`/propose|accept|reject|cancel`, `/items/{id}/perform`), `/v1/clinical-notes` (+`PUT`, `/sign`), `/v1/prescriptions`, `/v1/procedure-codes`, plus pasiyent üzrə siyahılar.
+
+**Miqrasiya `T008_clinical.sql`:** 18 prosedur kodlu kataloq, `prescriptions.override_reason`, DB qaydaları (aşağıda), plan bəndlərinə `row_version`.
+
+**Başqa modullarla əlaqə (yalnız kontraktlarla):**
+- `Scheduling.Contracts.IAppointmentLifecycle`: vizit başlayanda qəbul `in_progress`, bağlananda `completed` olur. Qəbul həmin pasiyentə və həkimə aid olmalıdır.
+- `Patient.Contracts.IPatientDirectory.GetActiveAllergiesAsync`: resept yoxlaması üçün.
+- Həkimin `own` scope-u "baxan həkim" əlaqəsi ilə həll olunur (Dilim 3).
+
+### Əsas qərarlar
+
+| Qərar | Səbəb |
+|---|---|
+| **Allergiya yoxlaması serverdədir.** Konflikt 422 `prescription.allergy_conflict` və konflikt siyahısı qaytarır. Keçmək üçün `overrideAllergyWarning=true` və ≥ 10 simvollu səbəb lazımdır, nəticə `prescription.allergy_override` kimi audit olunur | UI-ı keçib API-yə birbaşa yazmaq xəbərdarlığı atlamasın |
+| Resept dəyişməzdir, `allergy_check_passed = false` olarsa səbəb DB `CHECK` ilə məcburidir | Səbəbsiz override mümkün deyil, hətta birbaşa SQL ilə də |
+| Eyni diş+səth üçün yalnız **bir aktual qeyd** (DB unikal indeksi `ux_tooth_current_surface`). Bütün dişi (səthsiz) qeyd etmək səthlərin hamısını əvəz edir. Qeyd pasiyent üzrə advisory kilid altında tranzaksiyada yazılır | Paralel iki həkim eyni dişi dəyişəndə iki "aktual" qeyd qalmasın |
+| Bir həkim–pasiyent üçün yalnız **bir açıq vizit** (`ux_visits_one_open`) | Yarışa qarşı DB qoruması, 409 cavabı mövcud vizitin id-sini qaytarır |
+| Plan bəndi üçün **optimistic concurrency** (`row_version`). Prosedur yalnız həkimin öz açıq vizitində icra olunur | Eyni bəndi iki dəfə "icra olundu" etmək ikiqat faktura deməkdir |
+| `ProcedurePerformed` hadisəsi **qiyməti, endirimi və sayı daşıyır** | Billing icra anındakı qiymətlə faktura yazır, plan sonradan dəyişsə də |
+| Qaralama qeydlər yalnız müəllifə görünür və yalnız o dəyişə/imzalaya bilər. İmzadan sonra həm domen, həm DB trigger-i dəyişməyə icazə vermir | Klinik-hüquqi tələb: imzalanmış qeyd sübutdur |
+| Audit-ə dərman adı, qeyd mətni və diş şərhi yazılmır, yalnız fakt və sayı | Audit log PHI anbarına çevrilməsin |
+| Bütün klinik məlumat `Cache-Control: no-store` (odontoqram, reseptlər) | PHI brauzer/proxy keşinə düşməsin |
+| Plan yalnız qaralamada redaktə olunur (`version` hələlik həmişə 1) | Təklif olunmuş planın sənəd kimi dəyişməməsi. Dəyişiklik yeni plan kimi yaradılır |
+
+### Testlər (365 test, hamısı keçir)
+
+| Layer | Say |
+|---|---|
+| Architecture | 7 |
+| BuildingBlocks unit | 16 |
+| Identity unit / integration | 44 / 16 |
+| Patient unit | 64 |
+| Scheduling unit | 67 |
+| Clinical unit | 90 |
+| ClinicCore integration (Patient + Scheduling + Clinical, real PostgreSQL və real HTTP host) | 61 |
+
+Clinical inteqrasiya testləri (20): qəbuldan vizit və status keçidləri, 6 paralel "vizitə başla" (tam 1), səth üzrə əvəzlənmə və tarixçə, time travel, 6 paralel eyni dişə qeyd (tam 1 aktual), plan cəmləri və tam həyat dövrü və Billing-ə hazır hadisə yükü, 6 paralel eyni bəndin icrası (tam 1 faktura hadisəsi), ləğv olunmuş planda icra olunmuş bəndlərin qalması, allergiya konflikti/override/audit, DB `CHECK`, qaralama/imza/addendum və DB trigger-i, həkim `own` scope-u və baxan həkim əlaqəsi, tenant izolyasiyası, audit zənciri.
+
+**Testlərin dişi olduğunu yoxladım (mutasiya):** bənd üçün optimistic concurrency-ni, sonra odontoqram advisory kilidini qəsdən söndürdüm. Hər dəfə uyğun paralel test qırmızı oldu, bərpadan sonra yenə yaşıl.
+
+### Testlərin tapdığı real bug-lar (düzəldilib)
+
+1. **Allergiya yoxlaması böyük "İ" ilə yayınırdı.** `AMOKSİSİLLİN` (nöqtəli İ) `ToLowerInvariant` ilə `i̇` (i + birləşən nöqtə) olur və `penisillin` allergiyası ilə uyğun gəlmirdi. Azərbaycan/türk klinikaları üçün real təhlükə. İndi diakritiklər Unicode FormD ilə silinir.
+2. Test zamanı mənasız bir assertion də tapılıb düzəldildi (testin özündə səhv).
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Allergiya yoxlaması sadə ad və kiçik dərman sinfi lüğətidir** (penisillin, sefalosporin, NSAID, lokal anesteziklər, lateks, makrolid və s.). Tam dərman məlumat bazası DEYİL, qarşılıqlı təsir (interaction) yoxlaması yoxdur. Bu klinik qərar dəstəyi vasitəsidir, həkimin mühakiməsini əvəz etmir. Faza 3-də dərman bazası və AI ilə genişlənəcək.
+- **Perio chart, implant və ortodontik planlama, şəkil annotasiyası, before/after yoxdur** (spesifikasiyadakı Doctor modulunun bir hissəsi). Cədvəl (`perio_charts`) hazırdır, endpoint-lər yoxdur.
+- **Voice-to-text və AI qaralama yoxdur.** `source=voice|ai_draft` yalnız saxlanılır, AI funksiyası Faza 3-dədir.
+- **Plan bəndinin qiyməti əl ilə daxil edilir.** Billing modulunun qiymət siyahısı (`services`) ilə uyğunlaşma Dilim 5-də. Plan "estimate" faktura yaratmır (qəbul zamanı yalnız hadisə yazılır).
+- **Plan redaktəsi yoxdur** (yalnız yarat, təklif et, qəbul/rədd, ləğv, icra). Qaralama bəndlərini dəyişmək üçün endpoint əlavə olunmalıdır.
+- **Qəbul statusu vizitlə iki ayrı tranzaksiyadadır** (iki modulun iki DbContext-i). Vizit saxlanandan sonra qəbul `completed` edilir və uğursuz olarsa vizit yenə də bağlı sayılır. Tam atomiklik RabbitMQ saga-sı (Dilim 6) ilə gələcək.
+- **Prosedur icrası odontoqramı avtomatik yeniləmir** (məs. plomb icrasından sonra dişin vəziyyəti). Həkim ayrıca qeyd edir.
+- **Prosedurun materialları (stok)** hələ yoxdur, Inventory modulu Faza 2-dədir.
+- Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, audit partition job-u, Idempotency-Key, Testcontainers) qüvvədə qalır.
+
+> Növbəti dilim: **Billing** (qiymət siyahısı, faktura, qismən ödəniş, kassa smeni, geri qaytarma, `ProcedurePerformed`/`VisitClosed` hadisələrindən invoice qaralaması). Əvvəlcə **RabbitMQ publisher və inbox** (Dilim 6-nın bir hissəsi) lazım ola bilər, çünki Billing hadisələri istehlak edir. Davam etmək üçün **"Davam et"** yazın.

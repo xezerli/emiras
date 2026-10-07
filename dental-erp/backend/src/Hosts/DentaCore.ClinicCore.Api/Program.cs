@@ -5,6 +5,8 @@ using DentaCore.BuildingBlocks.Application;
 using DentaCore.BuildingBlocks.Infrastructure.Auth;
 using DentaCore.BuildingBlocks.Infrastructure.Http;
 using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
+using DentaCore.Clinical.Application;
+using DentaCore.Clinical.Infrastructure;
 using DentaCore.Patient.Application;
 using DentaCore.Patient.Infrastructure;
 using DentaCore.Scheduling.Application;
@@ -14,6 +16,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddPatientModule(builder.Configuration);
 builder.Services.AddSchedulingModule(builder.Configuration);
+builder.Services.AddClinicalModule(builder.Configuration);
 builder.Services.AddAuditModule(builder.Configuration);
 builder.Services.AddJwtValidation(builder.Configuration);
 
@@ -195,6 +198,75 @@ app.MapPost("/v1/waitlist", async (WaitlistRequest body, ISender sender, Cancell
     return result.ToHttpResult(w => Results.Created($"/v1/waitlist/{w.Id}", w));
 }).RequireAuthorization();
 
+// ---------------- Clinical ----------------
+var clinical = app.MapGroup("/v1").RequireAuthorization();
+
+clinical.MapPost("/visits", async (StartVisitRequest body, ISender sender, CancellationToken ct) =>
+{
+    var result = await sender.Send(new StartVisitCommand(body.PatientId, body.AppointmentId, body.ChiefComplaint), ct);
+    return result.ToHttpResult(v => Results.Created($"/v1/visits/{v.Id}", v));
+});
+clinical.MapPost("/visits/{id:guid}/close", async (Guid id, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new CloseVisitCommand(id), ct)).ToHttpResult(Results.Ok));
+clinical.MapGet("/patients/{patientId:guid}/visits", async (Guid patientId, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new ListVisitsQuery(patientId), ct)).ToHttpResult(Results.Ok));
+
+clinical.MapGet("/patients/{patientId:guid}/odontogram", async (Guid patientId, DateTimeOffset? at, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    return (await sender.Send(new GetOdontogramQuery(patientId, at), ct)).ToHttpResult(Results.Ok);
+});
+clinical.MapPost("/patients/{patientId:guid}/odontogram", async (Guid patientId, ToothRequest body, ISender sender, CancellationToken ct) =>
+{
+    var result = await sender.Send(new RecordToothCommand(patientId, body.ToothFdi, body.Surface, body.Condition, body.Material, body.Notes, body.VisitId), ct);
+    return result.ToHttpResult(r => Results.Created($"/v1/patients/{patientId}/odontogram/{r.ToothFdi}/history", r));
+});
+clinical.MapGet("/patients/{patientId:guid}/odontogram/{fdi:int}/history", async (Guid patientId, int fdi, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new GetToothHistoryQuery(patientId, fdi), ct)).ToHttpResult(Results.Ok));
+
+clinical.MapGet("/patients/{patientId:guid}/treatment-plans", async (Guid patientId, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new ListPlansQuery(patientId), ct)).ToHttpResult(Results.Ok));
+clinical.MapPost("/patients/{patientId:guid}/treatment-plans", async (Guid patientId, CreatePlanRequest body, ISender sender, CancellationToken ct) =>
+{
+    var result = await sender.Send(new CreatePlanCommand(patientId, body.Title, body.Items ?? []), ct);
+    return result.ToHttpResult(p => Results.Created($"/v1/treatment-plans/{p.Id}", p));
+});
+clinical.MapGet("/treatment-plans/{id:guid}", async (Guid id, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new GetPlanQuery(id), ct)).ToHttpResult(Results.Ok));
+foreach (var (path, action) in new[] { ("propose", PlanAction.Propose), ("accept", PlanAction.Accept), ("reject", PlanAction.Reject), ("cancel", PlanAction.Cancel) })
+{
+    clinical.MapPost($"/treatment-plans/{{id:guid}}/{path}", async (Guid id, ISender sender, CancellationToken ct) =>
+        (await sender.Send(new TransitionPlanCommand(id, action), ct)).ToHttpResult(Results.Ok));
+}
+
+clinical.MapPost("/treatment-plans/{planId:guid}/items/{itemId:guid}/perform", async (Guid planId, Guid itemId, PerformRequest body, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new PerformPlanItemCommand(planId, itemId, body.VisitId), ct)).ToHttpResult(Results.Ok));
+
+clinical.MapGet("/patients/{patientId:guid}/clinical-notes", async (Guid patientId, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new ListNotesQuery(patientId), ct)).ToHttpResult(Results.Ok));
+clinical.MapPost("/clinical-notes", async (NoteRequest body, ISender sender, CancellationToken ct) =>
+{
+    var result = await sender.Send(new CreateNoteCommand(body.PatientId, body.VisitId, body.Subjective, body.Objective, body.Assessment, body.Plan, body.Source, body.AddendumOf), ct);
+    return result.ToHttpResult(n => Results.Created($"/v1/patients/{n.PatientId}/clinical-notes", n));
+});
+clinical.MapPut("/clinical-notes/{id:guid}", async (Guid id, SoapRequest body, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new EditNoteCommand(id, body.Subjective, body.Objective, body.Assessment, body.Plan), ct)).ToHttpResult(Results.Ok));
+clinical.MapPost("/clinical-notes/{id:guid}/sign", async (Guid id, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new SignNoteCommand(id), ct)).ToHttpResult(Results.Ok));
+
+clinical.MapGet("/patients/{patientId:guid}/prescriptions", async (Guid patientId, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    return (await sender.Send(new ListPrescriptionsQuery(patientId), ct)).ToHttpResult(Results.Ok);
+});
+clinical.MapPost("/prescriptions", async (PrescriptionRequest body, ISender sender, CancellationToken ct) =>
+{
+    var result = await sender.Send(new IssuePrescriptionCommand(body.PatientId, body.VisitId, body.Items ?? [], body.OverrideAllergyWarning ?? false, body.OverrideReason), ct);
+    return result.ToHttpResult(p => Results.Created($"/v1/patients/{p.PatientId}/prescriptions", p));
+});
+clinical.MapGet("/procedure-codes", async (string? q, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new ListProcedureCodesQuery(q), ct)).ToHttpResult(Results.Ok));
+
 await app.RunAsync();
 
 // If-Match: "3" (ETag) və ya 3
@@ -225,6 +297,20 @@ internal sealed record BookAppointmentRequest(
     Guid BranchId, Guid PatientId, Guid ProviderId, Guid? RoomId, DateTimeOffset Start, DateTimeOffset End, string? Reason, string? Source, int[]? ReminderMinutes);
 
 internal sealed record CancelRequest(string? Reason);
+
+internal sealed record StartVisitRequest(Guid PatientId, Guid? AppointmentId, string? ChiefComplaint);
+
+internal sealed record ToothRequest(int ToothFdi, string? Surface, string Condition, string? Material, string? Notes, Guid? VisitId);
+
+internal sealed record CreatePlanRequest(string Title, IReadOnlyList<PlanItemInput>? Items);
+
+internal sealed record PerformRequest(Guid VisitId);
+
+internal sealed record SoapRequest(string? Subjective, string? Objective, string? Assessment, string? Plan);
+
+internal sealed record NoteRequest(Guid PatientId, Guid? VisitId, string? Subjective, string? Objective, string? Assessment, string? Plan, string? Source, Guid? AddendumOf);
+
+internal sealed record PrescriptionRequest(Guid PatientId, Guid? VisitId, IReadOnlyList<PrescriptionItemInput>? Items, bool? OverrideAllergyWarning, string? OverrideReason);
 
 internal sealed record WaitlistRequest(Guid PatientId, Guid BranchId, Guid? ProviderId, DateTimeOffset? Earliest, DateTimeOffset? Latest, int? Priority);
 
