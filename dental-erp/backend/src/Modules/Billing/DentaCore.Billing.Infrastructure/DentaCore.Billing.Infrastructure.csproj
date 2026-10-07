@@ -1,6 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="EFCore.NamingConventions" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../DentaCore.Billing.Application/DentaCore.Billing.Application.csproj" />
+    <ProjectReference Include="../../Clinical/DentaCore.Clinical.Contracts/DentaCore.Clinical.Contracts.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/DentaCore.BuildingBlocks.Infrastructure/DentaCore.BuildingBlocks.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

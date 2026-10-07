@@ -1,7 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../DentaCore.Billing.Domain/DentaCore.Billing.Domain.csproj" />
     <ProjectReference Include="../DentaCore.Billing.Contracts/DentaCore.Billing.Contracts.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/DentaCore.BuildingBlocks.Application/DentaCore.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Patient/DentaCore.Patient.Contracts/DentaCore.Patient.Contracts.csproj" />
+    <ProjectReference Include="../../Scheduling/DentaCore.Scheduling.Contracts/DentaCore.Scheduling.Contracts.csproj" />
+    <InternalsVisibleTo Include="DentaCore.Billing.UnitTests" />
   </ItemGroup>
 </Project>

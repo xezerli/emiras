@@ -458,7 +458,9 @@ paths:
       tags: [Billing]
       summary: Qiymət siyahısı
       x-permission: invoice:read
-      parameters: [ { name: q, in: query, schema: { type: string } } ]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: includeInactive, in: query, schema: { type: boolean, default: false } }
       responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Service' } } } } } }
     post:
       operationId: postServices
@@ -466,7 +468,21 @@ paths:
       summary: Xidmət əlavə et
       x-permission: settings:manage
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Service' } } } }
-      responses: { '201': { description: OK } }
+      responses: { '201': { description: OK }, '409': { $ref: '#/components/responses/Problem' } }
+  /services/{serviceId}:
+    put:
+      operationId: putServicesByService
+      tags: [Billing]
+      summary: Qiymət siyahısı bəndini yenilə (ad, kateqoriya, qiymət, ƏDV, aktivlik). Köhnə fakturalar dəyişmir
+      x-permission: settings:manage
+      parameters:
+        - { name: serviceId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IfMatch' }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Service' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Service' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+        '428': { $ref: '#/components/responses/Problem' }
   /invoices:
     get:
       operationId: getInvoices
@@ -504,11 +520,21 @@ paths:
       x-permission: invoice:write
       parameters: [ { $ref: '#/components/parameters/InvoiceId' } ]
       responses: { '200': { description: OK } }
+  /invoices/{invoiceId}/void:
+    post:
+      operationId: postInvoicesByInvoiceVoid
+      tags: [Billing]
+      summary: Fakturanı ləğv et (qaralama və ya ödənişsiz rəsmiləşdirilmiş). Ödəniş varsa əvvəl geri qaytarılmalıdır
+      x-permission: invoice:write
+      parameters: [ { $ref: '#/components/parameters/InvoiceId' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Invoice' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
   /invoices/{invoiceId}/pdf:
     get:
       operationId: getInvoicesByInvoicePdf
       tags: [Billing]
-      summary: PDF
+      summary: PDF (Faza 2, hələ həyata keçirilməyib)
       x-permission: invoice:read
       parameters: [ { $ref: '#/components/parameters/InvoiceId' } ]
       responses: { '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } } }
@@ -516,7 +542,7 @@ paths:
     post:
       operationId: postInvoicesByInvoicePayments
       tags: [Billing]
-      summary: Ödəniş qəbul et (qismən / tam). Idempotency-Key məcburidir
+      summary: Ödəniş qəbul et (qismən / tam). Idempotency-Key məcburidir; eyni açar eyni ödənişi qaytarır. Üsullar - cash, card, transfer, pos (nağd üçün açıq kassa smeni lazımdır)
       x-permission: payment:write
       parameters:
         - { $ref: '#/components/parameters/InvoiceId' }
@@ -530,7 +556,7 @@ paths:
     post:
       operationId: postPaymentsByPaymentRefund
       tags: [Billing]
-      summary: Geri qaytarma (əks əməliyyat, rol limiti yoxlanılır)
+      summary: Geri qaytarma (əks əməliyyat). Rolun role_permissions.max_amount limiti yoxlanılır (NULL - limitsiz, 0 - rəhbər lazımdır); borc bərpa olunur
       x-permission: invoice:refund
       parameters: [ { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }, { name: Idempotency-Key, in: header, required: true, schema: { type: string } } ]
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [amount, reason], properties: { amount: { type: number, minimum: 0.01 }, reason: { type: string } } } } } }
@@ -543,6 +569,13 @@ paths:
       x-permission: payment:write
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [branchId, openingCash], properties: { branchId: { type: string, format: uuid }, openingCash: { type: number } } } } } }
       responses: { '201': { description: OK } }
+  /cash-shifts/current:
+    get:
+      operationId: getCashShiftsCurrent
+      tags: [Billing]
+      summary: Cari istifadəçinin açıq smeni (yoxdursa 404)
+      x-permission: payment:write
+      responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/Problem' } }
   /cash-shifts/{shiftId}/close:
     post:
       operationId: postCashShiftsByShiftClose
@@ -1046,11 +1079,12 @@ components:
             insuranceAmount: { type: number }
             balance: { type: number, description: total - paidTotal - insuranceAmount }
             rowVersion: { type: integer }
+            payments: { type: array, items: { $ref: '#/components/schemas/Payment' }, description: Yalnız detal sorğusunda }
     PaymentCreate:
       type: object
       required: [method, amount]
       properties:
-        method: { type: string, enum: [cash, card, transfer, gift_card, insurance, installment, pos] }
+        method: { type: string, enum: [cash, card, transfer, gift_card, insurance, installment, pos], description: 'Hələlik yalnız cash, card, transfer, pos qəbul olunur' }
         amount: { type: number, minimum: 0.01 }
         reference: { type: string }
         giftCardCode: { type: string }
@@ -1058,7 +1092,14 @@ components:
       allOf:
         - $ref: '#/components/schemas/PaymentCreate'
         - type: object
-          properties: { id: { type: string, format: uuid }, kind: { type: string, enum: [payment, refund, prepayment] }, paidAt: { type: string, format: date-time }, invoiceStatus: { $ref: '#/components/schemas/InvoiceStatus' } }
+          properties:
+            id: { type: string, format: uuid }
+            kind: { type: string, enum: [payment, refund, prepayment] }
+            paidAt: { type: string, format: date-time }
+            invoiceStatus: { $ref: '#/components/schemas/InvoiceStatus' }
+            refundOf: { type: [string, 'null'], format: uuid }
+            reason: { type: [string, 'null'] }
+            shiftId: { type: [string, 'null'], format: uuid }
     DashboardSummary:
       type: object
       properties:

@@ -9,7 +9,7 @@
 | 3 | Scheduling (qəbul, double-booking, boş slotlar, növbə, no-show, xatırlatma planı) | ✅ Tamamlandı |
 | 4 | Clinical (vizit, odontoqram tarixçəsi, müalicə planı, resept allergiya yoxlaması ilə, imzalanan qeyd) | ✅ Tamamlandı |
 | 5a | Mesajlaşma: Outbox publisher + inbox + consumer host (RabbitMQ), no-show consumer, tenant maintenance | ✅ Tamamlandı |
-| 5b | Billing (faktura, ödəniş, kassa smeni, refund) + vizit→faktura saga | |
+| 5b | Billing (qiymət siyahısı, faktura, ödəniş, kassa smeni, refund) + prosedur→qaralama faktura consumer-i | ✅ Tamamlandı |
 | 6 | Audit publisher, Notify (SignalR), Gateway (YARP) | |
 | 7 | Dashboard, Sync, Elasticsearch indexer | |
 | 8 | Frontend (Next.js): Design System, auth, əsas ekranlar | |
@@ -296,7 +296,7 @@ Clinical inteqrasiya testləri (20): qəbuldan vizit və status keçidləri, 6 p
 - **Prosedurun materialları (stok)** hələ yoxdur, Inventory modulu Faza 2-dədir.
 - Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, audit partition job-u, Idempotency-Key, Testcontainers) qüvvədə qalır.
 
-> Növbəti dilim: **Dilim 5a** (aşağıda, RabbitMQ), sonra **Billing**. Davam etmək üçün **"Davam et"** yazın.
+> Növbəti dilim: **Dilim 5a** (aşağıda, RabbitMQ), sonra **Billing**.
 
 ---
 
@@ -323,12 +323,12 @@ Clinical inteqrasiya testləri (20): qəbuldan vizit və status keçidləri, 6 p
 - **Göndərmə outbox tranzaksiyası daxilindədir.** Commit-dən əvvəl proses ölərsə mesaj təkrar göndərilir (dublikat, itki yox). Əksinə sıra (əvvəl commit, sonra göndər) mesajı itirərdi.
 - **`SKIP LOCKED`** bir neçə Workers nüsxəsinin eyni sətri iki dəfə götürməməsini təmin edir və horizontal miqyaslanmanı açır.
 - **Routing key tenant-sızdır, tenant zərfdədir.** Bir növbə bütün tenant-lara xidmət edir (10 000 tenant üçün 10 000 növbə olmur). Consumer tenant-ı `platform.tenants`-dan slug ilə tapır və scope-u həmin tenant-a bağlayır.
-- **Topologiyanı consumer host elan edir və publisher-dən ƏVVƏL qalxır.** Subscriber-i olmayan routing key-ə göndərilən mesaj broker-də itir; növbə əvvəlcədən bağlı olmalıdır.
+- **Topologiyanı consumer host `StartAsync`-də elan edir və publisher-dən ƏVVƏL qalxır.** Subscriber-i olmayan routing key-ə göndərilən mesaj broker-də itir; növbə əvvəlcədən bağlı olmalıdır. Hosted servislər ardıcıl başlayır və `StartAsync` bitmədən növbəti başlamır. (İlk variantda topologiya `ExecuteAsync`-də qurulurdu, yəni publisher ilə yarışırdı: Dilim 5b testləri bunu üzə çıxardı, aşağıya baxın.)
 - **Zəhərli mesajlar itmir.** Oxunmayan JSON dərhal, tənzimlənən sayda uğursuz cəhddən sonra isə işlənə bilməyən mesaj DLQ-ya düşür (`dental.dead`), orada araşdırılır.
 - **No-show artırması atomik SQL-dir** (`no_show_count = no_show_count + 1`), oxu-dəyiş-yaz deyil: pasiyent kartının paralel redaktəsi ilə konkurensiya istisnası yaranmır. `NoShowCount` EF mapping-indən `ValueGeneratedOnAdd` çıxarıldı ki, domen dəyəri DB default-u ilə qarışmasın.
 - **Müqavilə testi:** Scheduling domen hadisəsinin real JSON-u `AppointmentMissedV1`-ə oxunur; sahə adı dəyişərsə test qırılır.
 
-### Testlər (373 test, hamısı keçir)
+### Testlər (373 test, hamısı keçir; Dilim 5b sonrası 14 Workers testi)
 
 Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real RabbitMQ** ilə işləyir (`DENTACORE_TEST_PG` və `DENTACORE_TEST_AMQP` təyin olunmayıbsa atlanır). Hər işə salma unikal exchange/növbə prefiksi alır və sonda təmizləyir.
 
@@ -358,4 +358,75 @@ Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real Ra
 - **Outbox sorğusu hər tenant üçün ardıcıl işləyir.** Minlərlə tenant üçün tenant-ları paralelləşdirmək və ya LISTEN/NOTIFY ilə oyatmaq optimallaşdırmasıdır.
 - Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Idempotency-Key, Testcontainers) qüvvədə qalır; **audit partition job-u və no-show consumer məhdudiyyətləri bu dilimlə bağlandı.**
 
-> Növbəti dilim: **5b Billing** (qiymət siyahısı, faktura, qismən ödəniş, kassa smeni, geri qaytarma, `ProcedurePerformed`/`VisitClosed` hadisələrindən invoice qaralaması). Davam etmək üçün **"Davam et"** yazın.
+> Dilim 5b-də tapılan və düzəldilən 5a xətası: **başlanğıc yarışı**. Consumer host topologiyanı `ExecuteAsync`-də (arxa fonda) qururdu, outbox publisher isə dərhal başlayırdı; yeni növbə hələ bağlanmamış exchange-ə göndərilən ilk mesaj broker-də itirdi və outbox onu "göndərilib" saymışdı. 5a-nın tək consumer-i yarışı təsadüfən qazanırdı. Düzəliş: topologiya `StartAsync`-də qurulur; regression testi (`Queues_are_declared_before_the_host_finishes_starting...`) host başlayan kimi növbələrin və dinləyicilərin mövcudluğunu yoxlayır.
+
+---
+
+## Dilim 5b: Billing
+
+### Nə yazıldı
+
+| Qat | Məzmun |
+|---|---|
+| Domen | `Invoice` (aggregate: sətirlər, yekunlar, issue/void, ödəniş, geri qaytarma, hadisələr), `InvoiceItem`, `Payment` (append-only), `CashShift`, `Service` (qiymət siyahısı), `Money` |
+| Tətbiq | Qiymət siyahısı (siyahı, yarat, yenilə), faktura (yarat, oxu, siyahı, issue, void), ödəniş qəbulu, geri qaytarma, kassa smeni (aç, bağla, cari), `BillingAccess`, `IRefundLimits` |
+| İnfrastruktur | `BillingDbContext`, `BillingRepository` (FOR UPDATE/SHARE kilidləri), `RefundLimits` (rolun `max_amount`), `ProcedurePerformedConsumer` |
+| Host | `DentaCore.Billing.Api` (14 endpoint, `Idempotency-Key`, `If-Match`), Workers-də Billing consumer-i |
+| Miqrasiya | `T010_billing.sql`: DB səviyyəsində pul qaydaları (aşağıda) |
+| Müqavilə | `Clinical.Contracts.ProcedurePerformedV1` |
+
+### Pul qaydaları (domenə və DB-yə eyni anda yazılıb)
+
+- **Məbləğ ən çox 2 onluq mərtəbədir**; DB `numeric(14,2)` səssiz yuvarlaqlaşdırmasın deyə domen rədd edir.
+- **Qiymətlər vergisizdir**: vergi = (sətir − endirim) × stavka, hər sətir üzrə yuvarlaqlaşdırılır (yarısı sıfırdan uzağa); yekun = cəm − endirim + vergi.
+- **Qaralamada sətir əlavə olunur, issue-dan sonra sətirlər dəyişməzdir** (domen + `trg_invoice_items_draft_only` trigger-i: birbaşa SQL də rədd olunur).
+- **Ödəniş qalıq borcu aşa bilməz** (`billing.overpayment`, cavabda cari qalıq) və DB-də `ck_invoices_no_overpay`.
+- **Ödəniş sətirləri dəyişməzdir** (T006 trigger-i). Düzəliş = əks əməliyyat: `kind='refund'` + `refund_of` (`ck_payments_refund_link`).
+- **Geri qaytarma ödənilmiş məbləği azaldır və borcu bərpa edir** (tam geri qaytarmadan sonra status yenə `issued`). Xidmət ləğv olunursa: əvvəl geri qaytar, sonra `void`. Statusu `refunded` hələlik istifadə olunmur.
+- **Limit** rolun `role_permissions.max_amount` dəyərindən oxunur (NULL = limitsiz, 0 = hər məbləğ üçün rəhbər lazımdır), bir sorğu üzrə yoxlanılır. Aşılanda 403 `billing.refund_limit_exceeded` və `limit` cavabdadır.
+- **Bir ödənişdən geri qaytarıla bilən = ödəniş − əvvəlki geri qaytarmalar** (`billing.refund_exceeds_payment`, cavabda `refundable`).
+- **Hər vizit üçün ən çox bir qaralama faktura** (`ux_invoices_one_draft_per_visit`) və **bir plan bəndi iki dəfə fakturalanmır** (`ux_invoice_items_plan_item`).
+
+### Konkurensiya və idempotentlik
+
+- **Ödəniş, geri qaytarma, void**: tranzaksiya açılır, faktura sətri `SELECT … FOR UPDATE` ilə kilidlənir, sonra yenidən yüklənir. Kilid olmadan paralel iki ödəniş eyni köhnə qalığı görür (mutasiya testi sübut etdi). Qalıq/kilid üçün yoxlama izlənməyən (`AsNoTracking`) nüsxə ilə edilir ki, kilid gözləyəndən sonra köhnəlmiş izlənən obyekt işlənməsin.
+- **Kassa smeni**: nağd ödəniş smen sətrini `FOR SHARE`, bağlama `FOR UPDATE` ilə kilidləyir. Bağlama ilə paralel nağd ödənişdə ya ödəniş smenə düşür və gözlənilən cəmə daxildir, ya smen bağlı olduğu üçün rədd olunur; itən pul olmur.
+- **`Idempotency-Key` ödəniş və geri qaytarmada məcburidir** (başlıq yoxdursa 400). Eyni açar + eyni sorğu = eyni nəticə (ikinci pul çıxmır); eyni açar + fərqli sorğu = 409. Eyni açarla paralel sorğular `payments.idempotency_key UNIQUE` ilə ardıcıllaşır: itirən tərəf qalibin nəticəsini qaytarır.
+- **Nağd ödəniş açıq smen tələb edir** (eyni filialda); kart/köçürmə tələb etmir və smen filialı fərqlidirsə kassaya yazılmır.
+
+### Prosedur → qaralama faktura
+
+`clinical.procedure-performed` hadisəsi vizitin qaralama fakturasına sətir əlavə edir (yoxdursa yaradır). Qiymət və endirim **icra anındakı plan bəndindən**, ƏDV və xidmət bağı `services.procedure_code` ilə qiymət siyahısından, ad isə xidmətin adından (yoxdursa prosedur adından) gəlir. Faktura avtomatik **issue olunmur**: bu insan qərarıdır (reception yoxlayıb təsdiqləyir). Faktura artıq issue olunubsa yeni hadisə yeni qaralama açır. Pasiyent tapılmasa mesaj təkrar cəhdlərdən sonra DLQ-ya düşür.
+
+### Testlər (461 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Billing.UnitTests` | 46 | Yekunlar və vergi yuvarlaqlaşdırması, validasiya sərhədləri, status maşını, ödəniş/geri qaytarma/void qaydaları, smen fərqi, qiymət siyahısı validasiyası |
+| `Billing.IntegrationTests` | 36 | Real PostgreSQL üzərində API: qiymət siyahısı + `If-Match`, qiymətlərin siyahıdan götürülməsi, issue-dan sonra dondurma (trigger), filial/tenant/own scope, cursor ilə səhifələmə (boşluq və təkrar yoxdur), overdue, kassa, limitli rollar, idempotentlik, audit zənciri bütövlüyü, DB-nin tətbiqi yan keçən SQL-ə qarşı müdafiəsi |
+| `Workers.IntegrationTests` (+5) | 14 | Prosedur → bir qaralama faktura (qiymət, endirim, ƏDV, xidmət bağı), təkrar çatdırılma ikiqat fakturalamır, issue-dan sonra yeni qaralama, olmayan pasiyent DLQ-da, hadisə JSON-unun müqavilə ilə uyğunluğu, başlanğıc sırası |
+
+**Konkurensiya testləri** (hamısı real paralel HTTP sorğuları): 10 paralel 60-lıq ödənişdən 100-lük fakturaya **tam biri** keçir; 5 paralel 20-lik ödəniş itkisiz 100 edir; eyni açarla 6 paralel sorğu **bir** ödəniş yaradır; ödəniş ilə void yarışında nəticə həmişə ya "ləğv, 0 pul", ya "50 ödənilib"; 8 paralel 30-luq geri qaytarmadan **tam 3-ü** keçir; smen bağlanarkən gələn nağd ödənişlər gözlənilən cəmlə uyğun qalır.
+
+**Mutasiya yoxlamaları** (kod bərpa olundu): faktura `FOR UPDATE` kilidi çıxarılanda üç konkurensiya testi qırılır; smen kilidi `FOR UPDATE`-dən `FOR SHARE`-ə endiriləndə smen-bağlama testi 3/3 qırılır.
+
+### Testlərin tapdığı real xətalar (düzəldilib)
+
+- **Başlanğıc yarışı** (yuxarıda): topologiya publisher ilə yarışırdı.
+- **Raw SQL alias-ları**: `SqlQuery<T>` rekord sahələrini `snake_case` sütunlarla uyğunlaşdırır (`service_id`, `vat_rate`); PascalCase alias consumer-i sındırırdı (Patient dilimindəki eyni dərs).
+- **Test hesabı**: ƏDV endirimdən sonrakı məbləğdən hesablanır; gözlənilən yekun düzəldildi.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Faktura nömrəsi PostgreSQL sequence-dir** (`INV-YYYY-000001`): ləğv olunmuş tranzaksiyalarda boşluq yaranır və nömrə qaralamada təyin olunur (issue-da yox). Boşluqsuz rəsmi nömrələmə tələb edən ölkələr üçün issue anında ayrıca nömrələmə cədvəli lazımdır.
+- **Qiymətlər vergisizdir** və qiymət siyahısında valyuta çevirməsi yoxdur: faktura tək valyutalıdır (qarışıq valyuta 422). Vergi-daxil qiymət rejimi və e-qaimə inteqrasiyası ayrıca iş.
+- **Promo kod, sığorta, taksit, hədiyyə kartı və depozit (prepayment) hələ yoxdur** (sxemdə hazırdır). Bu üsullar 422 qaytarır. Promo/sığorta sahələri göndərilərsə də 422.
+- **`POST /invoices` üçün `Idempotency-Key` hələ tətbiq olunmayıb** (OpenAPI-də var). Pul hərəkətləri (ödəniş, geri qaytarma) qorunur; faktura yaratmanın təkrarı ikinci qaralama yaradır. Vizit üçün isə unikal indeks ikinci qaralamanı rədd edir.
+- **PDF endpoint-i yoxdur** (Faza 2).
+- **Geri qaytarma limiti sorğu başınadır**, günlük/kumulyativ limit yoxdur.
+- **Smen bağlayan başqasının smenini yalnız `payment:write@tenant` ilə bağlaya bilər**; smen transferi və kassa orderi (giriş/çıxış) yoxdur.
+- **`VisitClosed` hadisəsi Billing tərəfindən istifadə olunmur**: qaralama prosedur hadisələri ilə yaranır. Vizit bağlananda avtomatik xatırlatma (faktura issue olunmayıb) Notify dilimində olacaq.
+- **Hesabatlar, gəlir/borc dashboard-u və Accounting jurnalı** hələ yoxdur; `billing.payment-received` və digər hadisələr outbox-a düşür, dinləyən yoxdur.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Testcontainers, SignalR, Elasticsearch) qüvvədə qalır.
+
+> Növbəti dilim: **6 Audit publisher, Notify (SignalR) və Gateway (YARP)**: bütün host-ları bir giriş nöqtəsinə bağlayır, hadisələri canlı bildirişə çevirir. Davam etmək üçün **"Davam et"** yazın.

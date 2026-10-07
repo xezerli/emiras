@@ -60,6 +60,20 @@ public sealed class BrokerFlowTests(MessagingFixture fx)
     }
 
     [MessagingFact]
+    public async Task Queues_are_declared_before_the_host_finishes_starting_so_the_first_event_cannot_be_lost()
+    {
+        using var host = StartHost();
+        using var client = host.CreateClient();   // host başlayıb: hosted servislərin StartAsync-ı bitib
+
+        await using var channel = await TestData.OpenChannelAsync(fx);
+        foreach (var queue in new[] { "patient.no-show", "billing.invoice-draft" })
+        {
+            var declared = await channel.QueueDeclarePassiveAsync($"{fx.QueuePrefix}.{queue}");   // yoxdursa istisna atır
+            Assert.True(declared.ConsumerCount > 0);   // dinləyici də qoşulub
+        }
+    }
+
+    [MessagingFact]
     public async Task Appointment_missed_increments_no_show_count_exactly_once_even_when_delivered_twice()
     {
         await TestData.ResetAsync(fx.Db);

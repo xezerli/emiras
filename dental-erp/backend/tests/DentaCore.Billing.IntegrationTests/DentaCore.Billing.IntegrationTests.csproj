@@ -9,11 +9,9 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
     <PackageReference Include="Npgsql" />
-    <PackageReference Include="RabbitMQ.Client" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/Hosts/DentaCore.Workers/DentaCore.Workers.csproj" />
-    <ProjectReference Include="../../src/Modules/Clinical/DentaCore.Clinical.Domain/DentaCore.Clinical.Domain.csproj" />
+    <ProjectReference Include="../../src/Hosts/DentaCore.Billing.Api/DentaCore.Billing.Api.csproj" />
     <ProjectReference Include="../DentaCore.TestSupport/DentaCore.TestSupport.csproj" />
   </ItemGroup>
 </Project>

@@ -21,29 +21,39 @@ public sealed partial class RabbitMqConsumerHost(
     IOptions<RabbitMqOptions> options,
     ILogger<RabbitMqConsumerHost> logger) : BackgroundService
 {
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    private IConnection? _connection;
+
+    /// <summary>
+    /// Topologiya və consumer-lər BURADA, host-un başlanğıcında qurulur (ExecuteAsync-də yox): hosted servislər ardıcıl başlayır və
+    /// StartAsync bitməmiş növbəti servis (outbox publisher) başlamır. Beləliklə publisher-in ilk mesajından əvvəl bütün növbələr
+    /// exchange-ə bağlıdır və mesaj subscriber olmadığı üçün itmir.
+    /// </summary>
+    public override async Task StartAsync(CancellationToken cancellationToken)
     {
         var list = registrations.Select(r => r.Registration).ToList();
-        if (list.Count == 0)
+        if (list.Count > 0)
         {
-            return;
+            var o = options.Value;
+            var factory = new ConnectionFactory { Uri = new Uri(o.Uri), ClientProvidedName = "dentacore-consumers" };
+            _connection = await factory.CreateConnectionAsync(cancellationToken);
+            foreach (var registration in list)
+            {
+                var channel = await _connection.CreateChannelAsync(cancellationToken: cancellationToken);
+                await DeclareAsync(channel, o, registration, cancellationToken);
+                await channel.BasicQosAsync(0, o.Prefetch, false, cancellationToken);
+                var consumer = new AsyncEventingBasicConsumer(channel);
+                consumer.ReceivedAsync += (_, args) => OnMessageAsync(channel, registration, args, o, _stopping.Token);
+                var queueName = QueueName(o, registration);
+                await channel.BasicConsumeAsync(queueName, autoAck: false, consumer, cancellationToken);
+                LogStarted(logger, queueName);
+            }
         }
 
-        var o = options.Value;
-        var factory = new ConnectionFactory { Uri = new Uri(o.Uri), ClientProvidedName = "dentacore-consumers" };
-        await using var connection = await factory.CreateConnectionAsync(stoppingToken);
-        foreach (var registration in list)
-        {
-            var channel = await connection.CreateChannelAsync(cancellationToken: stoppingToken);
-            await DeclareAsync(channel, o, registration, stoppingToken);
-            await channel.BasicQosAsync(0, o.Prefetch, false, stoppingToken);
-            var consumer = new AsyncEventingBasicConsumer(channel);
-            consumer.ReceivedAsync += (_, args) => OnMessageAsync(channel, registration, args, o, stoppingToken);
-            var queueName = QueueName(o, registration);
-            await channel.BasicConsumeAsync(queueName, autoAck: false, consumer, stoppingToken);
-            LogStarted(logger, queueName);
-        }
+        await base.StartAsync(cancellationToken);
+    }
 
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
         try
         {
             await Task.Delay(Timeout.Infinite, stoppingToken);
@@ -53,6 +63,26 @@ public sealed partial class RabbitMqConsumerHost(
             // normal dayanma
         }
     }
+
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _stopping.CancelAsync();
+        await base.StopAsync(cancellationToken);
+        if (_connection is not null)
+        {
+            await _connection.DisposeAsync();
+            _connection = null;
+        }
+    }
+
+    public override void Dispose()
+    {
+        _stopping.Dispose();
+        base.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    private readonly CancellationTokenSource _stopping = new();
 
     internal static string QueueName(RabbitMqOptions o, ConsumerRegistration r) => $"{o.QueuePrefix}.{r.Name}";
 

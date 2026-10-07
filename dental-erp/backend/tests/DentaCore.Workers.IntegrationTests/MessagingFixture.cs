@@ -57,7 +57,7 @@ public sealed class MessagingFixture : IAsyncLifetime
         var factory = new ConnectionFactory { Uri = new Uri(AmqpUri) };
         await using var connection = await factory.CreateConnectionAsync();
         await using var channel = await connection.CreateChannelAsync();
-        foreach (var queue in new[] { "patient.no-show", "probe" })
+        foreach (var queue in new[] { "patient.no-show", "billing.invoice-draft", "probe" })
         {
             foreach (var name in new[] { $"{QueuePrefix}.{queue}", $"{QueuePrefix}.{queue}.dlq" })
             {
