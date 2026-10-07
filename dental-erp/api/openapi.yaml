@@ -1,0 +1,992 @@
+openapi: 3.1.0
+info:
+  title: DentaCore API
+  version: 1.0.0
+  license: { name: Proprietary, identifier: LicenseRef-Proprietary }
+  summary: Dental Clinic ERP - Faza 1 (MVP) public API
+  description: |
+    Bütün endpoint-lər API Gateway üzərindən `/v1` prefiksi ilə açılır.
+    Tenant subdomain-dən (`klinika.dentacore.app`) və ya JWT `tid` claim-dən təyin olunur.
+    Xətalar RFC 9457 (`application/problem+json`). Siyahılar cursor pagination ilə.
+    Yazma əməliyyatlarında optimistic concurrency: `If-Match: <rowVersion>` (uyğunsuzluq → 412).
+    Pul məbləğləri string deyil, `number` (2 onluq) və ayrıca `currency`.
+servers:
+  - url: https://{tenant}.dentacore.app/v1
+    variables: { tenant: { default: demo } }
+  - url: https://clinic.local/v1
+    description: Local server
+security:
+  - bearerAuth: []
+tags:
+  - { name: Auth, description: 'Giriş, 2FA, token rotasiyası, sessiyalar' }
+  - { name: Patients, description: 'Pasiyent kartı, tibbi profil, sənədlər, razılıqlar' }
+  - { name: Scheduling, description: 'Təqvim, qəbul, növbə, wait list' }
+  - { name: Clinical, description: 'Vizit, odontoqram, müalicə planı, qeyd, resept' }
+  - { name: Billing, description: 'Qiymət, faktura, ödəniş, kassa' }
+  - { name: Dashboard, description: 'Canlı göstəricilər' }
+  - { name: Sync, description: 'Offline sinxronizasiya' }
+  - { name: Admin, description: 'İstifadəçi və audit' }
+paths:
+  /auth/login:
+    post:
+      operationId: postAuthLogin
+      tags: [Auth]
+      summary: Giriş (email + parol)
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } }
+      responses:
+        '200': { description: Tokenlər, content: { application/json: { schema: { $ref: '#/components/schemas/TokenResponse' } } } }
+        '202': { description: 2FA tələb olunur, content: { application/json: { schema: { $ref: '#/components/schemas/TwoFactorChallenge' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '423': { description: Hesab müvəqqəti bloklanıb, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '429': { $ref: '#/components/responses/Problem' }
+  /auth/2fa/verify:
+    post:
+      operationId: postAuth2faVerify
+      tags: [Auth]
+      summary: TOTP / WebAuthn kodunu təsdiqlə
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TwoFactorVerify' } } }
+      responses:
+        '200': { description: Tokenlər, content: { application/json: { schema: { $ref: '#/components/schemas/TokenResponse' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/refresh:
+    post:
+      operationId: postAuthRefresh
+      tags: [Auth]
+      summary: Refresh token rotasiyası (reuse aşkarlanarsa bütün family ləğv olunur)
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [refreshToken], properties: { refreshToken: { type: string } } } } }
+      responses:
+        '200': { description: Yeni cütlük, content: { application/json: { schema: { $ref: '#/components/schemas/TokenResponse' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /auth/logout:
+    post:
+      operationId: postAuthLogout
+      tags: [Auth]
+      summary: Cari sessiyanı bağla
+      responses: { '204': { description: OK } }
+  /auth/me:
+    get:
+      operationId: getAuthMe
+      tags: [Auth]
+      summary: Cari istifadəçi, rollar və effektiv icazələr
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CurrentUser' } } } }
+  /auth/sessions:
+    get:
+      operationId: getAuthSessions
+      tags: [Auth]
+      summary: Aktiv sessiyalar / cihazlar
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Session' } } } } }
+  /auth/sessions/{sessionId}:
+    delete:
+      operationId: deleteAuthSessionsBySession
+      tags: [Auth]
+      summary: Uzaqdan sessiyanı ləğv et
+      parameters: [ { name: sessionId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '204': { description: OK } }
+
+  /patients:
+    get:
+      operationId: getPatients
+      tags: [Patients]
+      summary: Pasiyent axtarışı (fuzzy, Elasticsearch)
+      x-permission: patient:read
+      parameters:
+        - { name: q, in: query, schema: { type: string }, description: 'Ad, soyad, telefon, FİN və ya kart nömrəsi' }
+        - { name: branchId, in: query, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PatientPage' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: postPatients
+      tags: [Patients]
+      summary: Yeni pasiyent
+      x-permission: patient:write
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PatientCreate' } } }
+      responses:
+        '201': { description: Yaradıldı, headers: { Location: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Patient' } } } }
+        '409': { description: Mümkün dublikat (eyni telefon/FİN), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /patients/{patientId}:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsByPatient
+      tags: [Patients]
+      summary: Pasiyent kartı (audit-ə yazılır)
+      x-permission: patient:read
+      responses:
+        '200': { description: OK, headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Patient' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: patchPatientsByPatient
+      tags: [Patients]
+      summary: Qismən yenilə (JSON Merge Patch)
+      x-permission: patient:write
+      parameters: [ { $ref: '#/components/parameters/IfMatch' } ]
+      requestBody:
+        required: true
+        content: { application/merge-patch+json: { schema: { $ref: '#/components/schemas/PatientUpdate' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Patient' } } } }
+        '412': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: deletePatientsByPatient
+      tags: [Patients]
+      summary: Soft delete (GDPR erasure ayrı workflow-dur)
+      x-permission: patient:write
+      responses: { '204': { description: OK } }
+  /patients/{patientId}/medical-profile:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsByPatientMedicalProfile
+      tags: [Patients]
+      summary: Allergiya, xəstəlik, dərman, son anamnez bir sorğuda
+      x-permission: clinical:read
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MedicalProfile' } } } }
+  /patients/{patientId}/allergies:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    post:
+      operationId: postPatientsByPatientAllergies
+      tags: [Patients]
+      summary: Allergiya əlavə et
+      x-permission: clinical:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Allergy' } } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Allergy' } } } } }
+  /patients/{patientId}/documents/upload-url:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    post:
+      operationId: postPatientsByPatientDocumentsUploadUrl
+      tags: [Patients]
+      summary: S3 pre-signed yükləmə URL-i (fayl API-dən keçmir)
+      x-permission: patient:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, fileName, mimeType, sizeBytes]
+              properties:
+                kind: { type: string, enum: [xray, cbct, mri, photo, model3d, lab_result, pdf, consent, other] }
+                fileName: { type: string }
+                mimeType: { type: string }
+                sizeBytes: { type: integer, maximum: 2147483648 }
+      responses:
+        '200':
+          description: Yükləmədən sonra `POST /documents` ilə təsdiqlənir
+          content: { application/json: { schema: { type: object, properties: { uploadUrl: { type: string, format: uri }, s3Key: { type: string }, expiresAt: { type: string, format: date-time } } } } }
+  /patients/{patientId}/documents:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsByPatientDocuments
+      tags: [Patients]
+      summary: Sənəd / görüntü siyahısı
+      x-permission: patient:read
+      parameters: [ { name: kind, in: query, schema: { type: string } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Document' } } } } } }
+    post:
+      operationId: postPatientsByPatientDocuments
+      tags: [Patients]
+      summary: Yüklənmiş faylı təsdiqlə və qeyd et
+      x-permission: patient:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Document' } } } } }
+  /patients/{patientId}/consents:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    post:
+      operationId: postPatientsByPatientConsents
+      tags: [Patients]
+      summary: Razılıq sənədini elektron imza ilə imzala
+      x-permission: patient:write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [templateId, signatureImageBase64, signedByName]
+              properties:
+                templateId: { type: string, format: uuid }
+                signatureImageBase64: { type: string, contentEncoding: base64 }
+                signedByName: { type: string }
+      responses: { '201': { description: 'İmzalandı, PDF və hash yaradıldı' } }
+
+  /appointments:
+    get:
+      operationId: getAppointments
+      tags: [Scheduling]
+      summary: Təqvim üçün qəbullar (aralıq üzrə)
+      x-permission: appointment:read
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: providerId, in: query, schema: { type: string, format: uuid } }
+        - { name: roomId, in: query, schema: { type: string, format: uuid } }
+        - { name: branchId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: array, items: { $ref: '#/components/schemas/AppointmentStatus' } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Appointment' } } } } } }
+    post:
+      operationId: postAppointments
+      tags: [Scheduling]
+      summary: Qəbul yarat
+      x-permission: appointment:write
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AppointmentCreate' } } }
+      responses:
+        '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '409': { description: Həkim və ya otaq həmin vaxtda məşğuldur, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /appointments/availability:
+    get:
+      operationId: getAppointmentsAvailability
+      tags: [Scheduling]
+      summary: Boş slotlar (iş qrafiki, time-off və mövcud qəbullar nəzərə alınır)
+      x-permission: appointment:read
+      parameters:
+        - { name: providerId, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+        - { name: durationMin, in: query, required: true, schema: { type: integer, minimum: 5, maximum: 480 } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Slot' } } } } } }
+  /appointments/{appointmentId}:
+    parameters: [ { $ref: '#/components/parameters/AppointmentId' } ]
+    get:
+      operationId: getAppointmentsByAppointment
+      tags: [Scheduling]
+      summary: Qəbul detalları
+      x-permission: appointment:read
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } } }
+    patch:
+      operationId: patchAppointmentsByAppointment
+      tags: [Scheduling]
+      summary: Vaxt / həkim / otaq dəyiş (drag & drop)
+      x-permission: appointment:write
+      parameters: [ { $ref: '#/components/parameters/IfMatch' } ]
+      requestBody:
+        required: true
+        content: { application/merge-patch+json: { schema: { $ref: '#/components/schemas/AppointmentUpdate' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Appointment' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+  /appointments/{appointmentId}/check-in:
+    post:
+      operationId: postAppointmentsByAppointmentCheckIn
+      tags: [Scheduling]
+      summary: Pasiyent gəldi, növbə bileti yaradılır
+      x-permission: appointment:write
+      parameters: [ { $ref: '#/components/parameters/AppointmentId' } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/QueueTicket' } } } } }
+  /appointments/{appointmentId}/cancel:
+    post:
+      operationId: postAppointmentsByAppointmentCancel
+      tags: [Scheduling]
+      summary: Ləğv et (wait list təklifi tetiklənir)
+      x-permission: appointment:write
+      parameters: [ { $ref: '#/components/parameters/AppointmentId' } ]
+      requestBody: { content: { application/json: { schema: { type: object, properties: { reason: { type: string } } } } } }
+      responses: { '200': { description: OK } }
+  /appointments/{appointmentId}/no-show:
+    post:
+      operationId: postAppointmentsByAppointmentNoShow
+      tags: [Scheduling]
+      summary: No-show qeydi (pasiyentin risk skoru yenilənir)
+      x-permission: appointment:write
+      parameters: [ { $ref: '#/components/parameters/AppointmentId' } ]
+      responses: { '200': { description: OK } }
+  /queue:
+    get:
+      operationId: getQueue
+      tags: [Scheduling]
+      summary: Bugünkü növbə (canlı; dəyişikliklər SignalR ilə)
+      x-permission: appointment:read
+      parameters: [ { name: branchId, in: query, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/QueueTicket' } } } } } }
+  /queue/{ticketId}/call:
+    post:
+      operationId: postQueueByTicketCall
+      tags: [Scheduling]
+      summary: Növbədəki pasiyenti çağır
+      parameters: [ { name: ticketId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK } }
+  /waitlist:
+    post:
+      operationId: postWaitlist
+      tags: [Scheduling]
+      summary: Gözləmə siyahısına əlavə et
+      x-permission: appointment:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [patientId, branchId], properties: { patientId: { type: string, format: uuid }, branchId: { type: string, format: uuid }, providerId: { type: string, format: uuid }, earliest: { type: string, format: date-time }, latest: { type: string, format: date-time }, priority: { type: integer, minimum: 1, maximum: 9 } } } } }
+      responses: { '201': { description: OK } }
+
+  /visits:
+    post:
+      operationId: postVisits
+      tags: [Clinical]
+      summary: Vizitə başla (qəbuldan və ya walk-in)
+      x-permission: clinical:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [patientId], properties: { patientId: { type: string, format: uuid }, appointmentId: { type: string, format: uuid }, chiefComplaint: { type: string } } } } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Visit' } } } } }
+  /visits/{visitId}/close:
+    post:
+      operationId: postVisitsByVisitClose
+      tags: [Clinical]
+      summary: Vizit bağla, yerinə yetirilmiş prosedurlar üçün invoice qaralaması yaranır (saga)
+      x-permission: clinical:write
+      parameters: [ { name: visitId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Visit' } } } } }
+  /patients/{patientId}/odontogram:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsByPatientOdontogram
+      tags: [Clinical]
+      summary: Cari odontoqram (hər diş üçün aktual qeydlər)
+      x-permission: clinical:read
+      parameters: [ { name: at, in: query, schema: { type: string, format: date-time }, description: Tarixi vəziyyət (time travel) } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Odontogram' } } } } }
+    post:
+      operationId: postPatientsByPatientOdontogram
+      tags: [Clinical]
+      summary: Diş vəziyyəti qeyd et (köhnə qeyd əvəz olunur, tarixçə qalır)
+      x-permission: clinical:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ToothRecordCreate' } } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ToothRecord' } } } } }
+  /patients/{patientId}/treatment-plans:
+    parameters: [ { $ref: '#/components/parameters/PatientId' } ]
+    get:
+      operationId: getPatientsByPatientTreatmentPlans
+      tags: [Clinical]
+      summary: Müalicə planları
+      x-permission: clinical:read
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/TreatmentPlan' } } } } } }
+    post:
+      operationId: postPatientsByPatientTreatmentPlans
+      tags: [Clinical]
+      summary: Plan yarat
+      x-permission: clinical:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/TreatmentPlanCreate' } } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TreatmentPlan' } } } } }
+  /treatment-plans/{planId}/accept:
+    post:
+      operationId: postTreatmentPlansByPlanAccept
+      tags: [Clinical]
+      summary: Pasiyent planı qəbul etdi (estimate yaranır)
+      x-permission: clinical:write
+      parameters: [ { name: planId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TreatmentPlan' } } } } }
+  /treatment-plans/{planId}/items/{itemId}/perform:
+    post:
+      operationId: postTreatmentPlansByPlanItemsByItemPerform
+      tags: [Clinical]
+      summary: Prosedur icra olundu (ProcedurePerformed event-i, stok və billing saga)
+      x-permission: clinical:write
+      parameters:
+        - { name: planId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: itemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [visitId], properties: { visitId: { type: string, format: uuid } } } } }
+      responses: { '200': { description: OK } }
+  /clinical-notes:
+    post:
+      operationId: postClinicalNotes
+      tags: [Clinical]
+      summary: SOAP qeydi (source=voice olduqda AI draft)
+      x-permission: clinical:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ClinicalNote' } } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ClinicalNote' } } } } }
+  /clinical-notes/{noteId}/sign:
+    post:
+      operationId: postClinicalNotesByNoteSign
+      tags: [Clinical]
+      summary: İmzala (bundan sonra dəyişməzdir; düzəliş addendum ilə)
+      x-permission: clinical:write
+      parameters: [ { name: noteId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: OK } }
+  /prescriptions:
+    post:
+      operationId: postPrescriptions
+      tags: [Clinical]
+      summary: Resept (allergiya yoxlaması server tərəfdədir)
+      x-permission: prescription:write
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PrescriptionCreate' } } }
+      responses:
+        '201': { description: OK }
+        '422': { description: Allergiya ilə ziddiyyət (override=true və səbəb tələb olunur), content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /services:
+    get:
+      operationId: getServices
+      tags: [Billing]
+      summary: Qiymət siyahısı
+      x-permission: invoice:read
+      parameters: [ { name: q, in: query, schema: { type: string } } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Service' } } } } } }
+    post:
+      operationId: postServices
+      tags: [Billing]
+      summary: Xidmət əlavə et
+      x-permission: settings:manage
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Service' } } } }
+      responses: { '201': { description: OK } }
+  /invoices:
+    get:
+      operationId: getInvoices
+      tags: [Billing]
+      summary: Fakturalar
+      x-permission: invoice:read
+      parameters:
+        - { name: patientId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/InvoiceStatus' } }
+        - { name: overdue, in: query, schema: { type: boolean } }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/Invoice' } }, nextCursor: { type: [string, 'null'] } } } } } } }
+    post:
+      operationId: postInvoices
+      tags: [Billing]
+      summary: Faktura / estimate yarat
+      x-permission: invoice:write
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/InvoiceCreate' } } } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Invoice' } } } } }
+  /invoices/{invoiceId}:
+    get:
+      operationId: getInvoicesByInvoice
+      tags: [Billing]
+      summary: Faktura detalları
+      x-permission: invoice:read
+      parameters: [ { $ref: '#/components/parameters/InvoiceId' } ]
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Invoice' } } } } }
+  /invoices/{invoiceId}/issue:
+    post:
+      operationId: postInvoicesByInvoiceIssue
+      tags: [Billing]
+      summary: Qaralamanı rəsmiləşdir (nömrə təyin olunur, redaktə bağlanır)
+      x-permission: invoice:write
+      parameters: [ { $ref: '#/components/parameters/InvoiceId' } ]
+      responses: { '200': { description: OK } }
+  /invoices/{invoiceId}/pdf:
+    get:
+      operationId: getInvoicesByInvoicePdf
+      tags: [Billing]
+      summary: PDF
+      x-permission: invoice:read
+      parameters: [ { $ref: '#/components/parameters/InvoiceId' } ]
+      responses: { '200': { description: PDF, content: { application/pdf: { schema: { type: string, format: binary } } } } }
+  /invoices/{invoiceId}/payments:
+    post:
+      operationId: postInvoicesByInvoicePayments
+      tags: [Billing]
+      summary: Ödəniş qəbul et (qismən / tam). Idempotency-Key məcburidir
+      x-permission: payment:write
+      parameters:
+        - { $ref: '#/components/parameters/InvoiceId' }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, maxLength: 64 } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PaymentCreate' } } } }
+      responses:
+        '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { description: Məbləğ qalıq borcu aşır və ya smen açıq deyil, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /payments/{paymentId}/refund:
+    post:
+      operationId: postPaymentsByPaymentRefund
+      tags: [Billing]
+      summary: Geri qaytarma (əks əməliyyat, rol limiti yoxlanılır)
+      x-permission: invoice:refund
+      parameters: [ { name: paymentId, in: path, required: true, schema: { type: string, format: uuid } }, { name: Idempotency-Key, in: header, required: true, schema: { type: string } } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [amount, reason], properties: { amount: { type: number, minimum: 0.01 }, reason: { type: string } } } } } }
+      responses: { '201': { description: OK }, '403': { $ref: '#/components/responses/Problem' } }
+  /cash-shifts/open:
+    post:
+      operationId: postCashShiftsOpen
+      tags: [Billing]
+      summary: Kassa smenini aç
+      x-permission: payment:write
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [branchId, openingCash], properties: { branchId: { type: string, format: uuid }, openingCash: { type: number } } } } } }
+      responses: { '201': { description: OK } }
+  /cash-shifts/{shiftId}/close:
+    post:
+      operationId: postCashShiftsByShiftClose
+      tags: [Billing]
+      summary: Smeni bağla (gözlənilən və faktiki nağd fərqi hesablanır)
+      x-permission: payment:write
+      parameters: [ { name: shiftId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [closingCash], properties: { closingCash: { type: number } } } } } }
+      responses: { '200': { description: OK } }
+
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [Dashboard]
+      summary: Dashboard göstəriciləri (Redis cache 30 san; canlı yeniləmə SignalR ilə)
+      x-permission: report:read
+      parameters:
+        - { name: branchId, in: query, schema: { type: string, format: uuid } }
+        - { name: date, in: query, schema: { type: string, format: date } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardSummary' } } } } }
+
+  /sync/pull:
+    get:
+      operationId: getSyncPull
+      tags: [Sync]
+      summary: Offline klient üçün dəyişikliklər (change_log seq üzrə)
+      parameters:
+        - { name: since, in: query, required: true, schema: { type: integer, format: int64 }, description: Son alınmış seq (0 = tam sync) }
+        - { name: limit, in: query, schema: { type: integer, default: 500, maximum: 2000 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPullResponse' } } } }
+        '410': { description: 'since çox köhnədir, tam re-sync lazımdır', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /sync/push:
+    post:
+      operationId: postSyncPush
+      tags: [Sync]
+      summary: Offline dəyişiklikləri göndər (idempotent; konfliktlər cavabda qaytarılır)
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPushRequest' } } } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPushResponse' } } } } }
+
+  /admin/users:
+    get:
+      operationId: getAdminUsers
+      tags: [Admin]
+      summary: İstifadəçilər
+      x-permission: user:manage
+      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UserSummary' } } } } } }
+    post:
+      operationId: postAdminUsers
+      tags: [Admin]
+      summary: İstifadəçi yarat (dəvət emaili göndərilir)
+      x-permission: user:manage
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UserCreate' } } } }
+      responses: { '201': { description: OK } }
+  /admin/audit:
+    get:
+      operationId: getAdminAudit
+      tags: [Admin]
+      summary: Audit log axtarışı (Elasticsearch)
+      x-permission: audit:read
+      parameters:
+        - { name: entity, in: query, schema: { type: string } }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+        - { name: userId, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses: { '200': { description: OK } }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    PatientId: { name: patientId, in: path, required: true, schema: { type: string, format: uuid } }
+    AppointmentId: { name: appointmentId, in: path, required: true, schema: { type: string, format: uuid } }
+    InvoiceId: { name: invoiceId, in: path, required: true, schema: { type: string, format: uuid } }
+    Cursor: { name: cursor, in: query, schema: { type: string }, description: Opaque cursor }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+    IfMatch: { name: If-Match, in: header, required: true, schema: { type: string }, description: Resursun rowVersion dəyəri (ETag) }
+    IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 64 }, description: Təkrar göndərmə eyni nəticəni qaytarır (24 saat) }
+  responses:
+    Problem:
+      description: Xəta (RFC 9457)
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri-reference, description: 'https://errors.dentacore.app/<code>' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        code: { type: string, examples: [appointment.overlap, auth.invalid_credentials, billing.overpayment] }
+        traceId: { type: string }
+        errors: { type: object, additionalProperties: { type: array, items: { type: string } } }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        deviceName: { type: string }
+        deviceId: { type: string, format: uuid }
+    TokenResponse:
+      type: object
+      required: [accessToken, refreshToken, expiresIn]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn: { type: integer, description: Saniyə (600) }
+        tokenType: { type: string, const: Bearer }
+    TwoFactorChallenge:
+      type: object
+      properties: { challengeId: { type: string }, methods: { type: array, items: { type: string, enum: [totp, webauthn] } } }
+    TwoFactorVerify:
+      type: object
+      required: [challengeId, code]
+      properties: { challengeId: { type: string }, code: { type: string, pattern: '^[0-9]{6}$' } }
+    Session:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        deviceName: { type: string }
+        ip: { type: string }
+        lastSeenAt: { type: string, format: date-time }
+        current: { type: boolean }
+    CurrentUser:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        fullName: { type: string }
+        specialty: { type: [string, 'null'] }
+        roles: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: object, properties: { code: { type: string }, scope: { type: string, enum: [own, branch, tenant] }, maxAmount: { type: [number, 'null'] } } } }
+        branches: { type: array, items: { type: string, format: uuid } }
+        locale: { type: string }
+    Address:
+      type: object
+      properties: { city: { type: string }, street: { type: string }, zip: { type: string } }
+    PatientCreate:
+      type: object
+      required: [branchId, firstName, lastName]
+      properties:
+        branchId: { type: string, format: uuid }
+        firstName: { type: string, maxLength: 100 }
+        lastName: { type: string, maxLength: 100 }
+        fatherName: { type: string }
+        birthDate: { type: string, format: date }
+        gender: { type: string, enum: [M, F, O] }
+        phone: { type: string, pattern: '^\+?[0-9]{7,15}$' }
+        email: { type: string, format: email }
+        nationalId: { type: string }
+        address: { $ref: '#/components/schemas/Address' }
+        preferredChannel: { type: string, enum: [sms, whatsapp, telegram, email, push, none] }
+        marketingOptIn: { type: boolean }
+        referralSource: { type: string }
+    PatientUpdate:
+      type: object
+      description: PatientCreate sahələrinin istənilən alt çoxluğu
+      additionalProperties: true
+    Patient:
+      allOf:
+        - $ref: '#/components/schemas/PatientCreate'
+        - type: object
+          required: [id, chartNo, rowVersion]
+          properties:
+            id: { type: string, format: uuid }
+            chartNo: { type: integer, format: int64 }
+            status: { type: string, enum: [active, inactive, deceased, merged] }
+            noShowCount: { type: integer }
+            riskScore: { type: [number, 'null'] }
+            hasSevereAllergy: { type: boolean, description: UI-da qırmızı bayraq üçün }
+            balance: { type: number, description: Cari borc }
+            rowVersion: { type: integer }
+            createdAt: { type: string, format: date-time }
+    PatientPage:
+      type: object
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Patient' } }, nextCursor: { type: [string, 'null'] } }
+    Allergy:
+      type: object
+      required: [substance]
+      properties:
+        id: { type: string, format: uuid }
+        substance: { type: string }
+        reaction: { type: string }
+        severity: { type: string, enum: [mild, moderate, severe, anaphylaxis] }
+    MedicalProfile:
+      type: object
+      properties:
+        allergies: { type: array, items: { $ref: '#/components/schemas/Allergy' } }
+        conditions: { type: array, items: { type: object, properties: { icd10Code: { type: string }, name: { type: string }, since: { type: string, format: date } } } }
+        medications: { type: array, items: { type: object, properties: { name: { type: string }, dose: { type: string }, frequency: { type: string } } } }
+        latestAnamnesis: { type: object, additionalProperties: true }
+    Document:
+      type: object
+      required: [kind, s3Key]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string }
+        title: { type: string }
+        s3Key: { type: string }
+        mimeType: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        sha256: { type: string }
+        takenAt: { type: string, format: date-time }
+        downloadUrl: { type: string, format: uri, readOnly: true }
+    AppointmentStatus:
+      type: string
+      enum: [booked, confirmed, checked_in, in_progress, completed, cancelled, no_show, rescheduled]
+    AppointmentCreate:
+      type: object
+      required: [branchId, patientId, providerId, start, end]
+      properties:
+        branchId: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        providerId: { type: string, format: uuid }
+        roomId: { type: string, format: uuid }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        reason: { type: string }
+        recurrenceRule: { type: string, description: RFC 5545 RRULE, examples: ['FREQ=WEEKLY;COUNT=4'] }
+        reminders: { type: array, items: { type: object, properties: { channel: { type: string }, minutesBefore: { type: integer } } } }
+    AppointmentUpdate:
+      type: object
+      properties:
+        providerId: { type: string, format: uuid }
+        roomId: { type: string, format: uuid }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        reason: { type: string }
+    Appointment:
+      allOf:
+        - $ref: '#/components/schemas/AppointmentCreate'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            status: { $ref: '#/components/schemas/AppointmentStatus' }
+            patientName: { type: string }
+            rowVersion: { type: integer }
+    Slot:
+      type: object
+      properties: { start: { type: string, format: date-time }, end: { type: string, format: date-time }, roomId: { type: string, format: uuid } }
+    QueueTicket:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        ticketNo: { type: integer }
+        patientName: { type: string }
+        status: { type: string, enum: [waiting, called, serving, done, left] }
+        waitingMinutes: { type: integer }
+    Visit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: [string, 'null'], format: date-time }
+        status: { type: string, enum: [open, closed] }
+    ToothRecordCreate:
+      type: object
+      required: [toothFdi, condition]
+      properties:
+        visitId: { type: string, format: uuid }
+        toothFdi: { type: integer, description: 'FDI: 11-48 daimi, 51-85 süd' }
+        surface: { type: string, enum: [M, D, O, B, L, I, F, P] }
+        condition: { type: string, enum: [healthy, caries, filling, crown, bridge, implant, root_canal, extracted, missing, impacted, fracture, periapical_lesion, veneer] }
+        material: { type: string }
+        notes: { type: string }
+    ToothRecord:
+      allOf:
+        - $ref: '#/components/schemas/ToothRecordCreate'
+        - type: object
+          properties: { id: { type: string, format: uuid }, recordedAt: { type: string, format: date-time }, recordedBy: { type: string, format: uuid } }
+    Odontogram:
+      type: object
+      properties:
+        patientId: { type: string, format: uuid }
+        dentition: { type: string, enum: [permanent, primary, mixed] }
+        teeth: { type: object, description: 'Açar = FDI nömrəsi', additionalProperties: { type: array, items: { $ref: '#/components/schemas/ToothRecord' } } }
+    TreatmentPlanCreate:
+      type: object
+      required: [title, items]
+      properties:
+        title: { type: string }
+        items: { type: array, minItems: 1, items: { $ref: '#/components/schemas/PlanItem' } }
+    PlanItem:
+      type: object
+      required: [procedureCode, quantity, unitPrice]
+      properties:
+        id: { type: string, format: uuid }
+        procedureCode: { type: string }
+        toothFdi: { type: integer }
+        surface: { type: string }
+        phase: { type: integer, minimum: 1 }
+        quantity: { type: integer, minimum: 1 }
+        unitPrice: { type: number, minimum: 0 }
+        discountPercent: { type: number, minimum: 0, maximum: 100 }
+        status: { type: string, enum: [planned, scheduled, done, cancelled] }
+    TreatmentPlan:
+      allOf:
+        - $ref: '#/components/schemas/TreatmentPlanCreate'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [draft, proposed, accepted, in_progress, completed, rejected, cancelled] }
+            version: { type: integer }
+            total: { type: number }
+            aiGenerated: { type: boolean }
+    ClinicalNote:
+      type: object
+      required: [patientId]
+      properties:
+        id: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        visitId: { type: string, format: uuid }
+        subjective: { type: string }
+        objective: { type: string }
+        assessment: { type: string }
+        plan: { type: string }
+        source: { type: string, enum: [typed, voice, ai_draft] }
+        addendumOf: { type: string, format: uuid }
+        signedAt: { type: [string, 'null'], format: date-time }
+    PrescriptionCreate:
+      type: object
+      required: [patientId, items]
+      properties:
+        patientId: { type: string, format: uuid }
+        visitId: { type: string, format: uuid }
+        overrideAllergyWarning: { type: boolean }
+        overrideReason: { type: string }
+        items: { type: array, minItems: 1, items: { type: object, required: [drug, dose], properties: { drug: { type: string }, dose: { type: string }, frequency: { type: string }, days: { type: integer }, notes: { type: string } } } }
+    Service:
+      type: object
+      required: [code, name, price]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        procedureCode: { type: string }
+        name: { type: string }
+        category: { type: string }
+        price: { type: number, minimum: 0 }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        vatRate: { type: number }
+    InvoiceStatus:
+      type: string
+      enum: [draft, issued, partially_paid, paid, void, refunded]
+    InvoiceCreate:
+      type: object
+      required: [kind, patientId, branchId, items]
+      properties:
+        kind: { type: string, enum: [estimate, invoice] }
+        patientId: { type: string, format: uuid }
+        branchId: { type: string, format: uuid }
+        visitId: { type: string, format: uuid }
+        planId: { type: string, format: uuid }
+        promoCode: { type: string }
+        insurancePolicyId: { type: string, format: uuid }
+        dueDate: { type: string, format: date }
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [description, quantity, unitPrice]
+            properties:
+              serviceId: { type: string, format: uuid }
+              planItemId: { type: string, format: uuid }
+              description: { type: string }
+              toothFdi: { type: integer }
+              providerId: { type: string, format: uuid }
+              quantity: { type: integer, minimum: 1 }
+              unitPrice: { type: number, minimum: 0 }
+              discount: { type: number, minimum: 0 }
+    Invoice:
+      allOf:
+        - $ref: '#/components/schemas/InvoiceCreate'
+        - type: object
+          properties:
+            id: { type: string, format: uuid }
+            number: { type: string }
+            status: { $ref: '#/components/schemas/InvoiceStatus' }
+            currency: { type: string }
+            subtotal: { type: number }
+            discountTotal: { type: number }
+            taxTotal: { type: number }
+            total: { type: number }
+            paidTotal: { type: number }
+            insuranceAmount: { type: number }
+            balance: { type: number, description: total - paidTotal - insuranceAmount }
+            rowVersion: { type: integer }
+    PaymentCreate:
+      type: object
+      required: [method, amount]
+      properties:
+        method: { type: string, enum: [cash, card, transfer, gift_card, insurance, installment, pos] }
+        amount: { type: number, minimum: 0.01 }
+        reference: { type: string }
+        giftCardCode: { type: string }
+    Payment:
+      allOf:
+        - $ref: '#/components/schemas/PaymentCreate'
+        - type: object
+          properties: { id: { type: string, format: uuid }, kind: { type: string, enum: [payment, refund, prepayment] }, paidAt: { type: string, format: date-time }, invoiceStatus: { $ref: '#/components/schemas/InvoiceStatus' } }
+    DashboardSummary:
+      type: object
+      properties:
+        date: { type: string, format: date }
+        appointmentsToday: { type: object, properties: { total: { type: integer }, completed: { type: integer }, noShow: { type: integer }, waiting: { type: integer } } }
+        revenueToday: { type: number }
+        revenueMonth: { type: number }
+        outstandingDebt: { type: number }
+        newPatients: { type: integer }
+        topServices: { type: array, items: { type: object, properties: { name: { type: string }, count: { type: integer }, revenue: { type: number } } } }
+        topProviders: { type: array, items: { type: object, properties: { providerId: { type: string, format: uuid }, name: { type: string }, revenue: { type: number } } } }
+        rooms: { type: array, items: { type: object, properties: { roomId: { type: string, format: uuid }, name: { type: string }, state: { type: string, enum: [free, occupied, cleaning] } } } }
+        revenueSeries: { type: array, items: { type: object, properties: { day: { type: string, format: date }, amount: { type: number } } } }
+    SyncChange:
+      type: object
+      required: [entity, entityId, op]
+      properties:
+        seq: { type: integer, format: int64 }
+        entity: { type: string }
+        entityId: { type: string, format: uuid }
+        op: { type: string, enum: [I, U, D] }
+        baseVersion: { type: integer, description: Klientin əsaslandığı rowVersion (push zamanı) }
+        data: { type: object, additionalProperties: true }
+        clientChangeId: { type: string, format: uuid, description: Push idempotentliyi üçün }
+    SyncPullResponse:
+      type: object
+      properties:
+        changes: { type: array, items: { $ref: '#/components/schemas/SyncChange' } }
+        lastSeq: { type: integer, format: int64 }
+        hasMore: { type: boolean }
+    SyncPushRequest:
+      type: object
+      required: [deviceId, changes]
+      properties: { deviceId: { type: string, format: uuid }, changes: { type: array, items: { $ref: '#/components/schemas/SyncChange' } } }
+    SyncPushResponse:
+      type: object
+      properties:
+        applied: { type: array, items: { type: string, format: uuid }, description: Tətbiq olunmuş clientChangeId-lər }
+        conflicts: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entity: { type: string }, entityId: { type: string, format: uuid }, serverVersion: { type: integer }, serverData: { type: object, additionalProperties: true }, resolution: { type: string, enum: [merged, needs_manual] } } } }
+    UserSummary:
+      type: object
+      properties: { id: { type: string, format: uuid }, fullName: { type: string }, specialty: { type: string }, roles: { type: array, items: { type: string } }, status: { type: string } }
+    UserCreate:
+      type: object
+      required: [email, fullName, roleCodes]
+      properties:
+        email: { type: string, format: email }
+        fullName: { type: string }
+        specialty: { type: string }
+        roleCodes: { type: array, items: { type: string } }
+        branchIds: { type: array, items: { type: string, format: uuid } }

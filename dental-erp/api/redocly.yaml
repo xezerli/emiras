@@ -1,0 +1,4 @@
+extends: [recommended]
+rules:
+  # 401/403/429 Gateway səviyyəsində bütün endpoint-lər üçün qaytarıla bilər (docs/03-api-specification.md §2)
+  operation-4xx-response: off
