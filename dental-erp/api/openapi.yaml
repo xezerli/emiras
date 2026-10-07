@@ -70,7 +70,10 @@ paths:
     post:
       operationId: postAuthLogout
       tags: [Auth]
-      summary: Cari sessiyanı bağla
+      summary: Sessiyanı bağla (refresh token family-si ləğv olunur, idempotentdir)
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [refreshToken], properties: { refreshToken: { type: string } } } } }
       responses: { '204': { description: OK } }
   /auth/me:
     get:

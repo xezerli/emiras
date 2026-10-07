@@ -4,4 +4,7 @@
     <ProjectReference Include="../DentaCore.Identity.Contracts/DentaCore.Identity.Contracts.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/DentaCore.BuildingBlocks.Application/DentaCore.BuildingBlocks.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DentaCore.Identity.UnitTests" />
+  </ItemGroup>
 </Project>

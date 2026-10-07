@@ -1,0 +1,5 @@
+[*.cs]
+# Yalnız C# istifadə olunur: VB açar sözü ilə toqquşma (Error, Result və s.) problem deyil
+dotnet_diagnostic.CA1716.severity = none
+# Layihə daxili Result/Error API-sində ConfigureAwait lazım deyil (ASP.NET Core-da SynchronizationContext yoxdur)
+dotnet_diagnostic.CA2007.severity = none
