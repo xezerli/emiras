@@ -4,6 +4,8 @@ using DentaCore.BuildingBlocks.Infrastructure.Outbox;
 using DentaCore.BuildingBlocks.Infrastructure.Security;
 using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
 using DentaCore.Patient.Application;
+using DentaCore.Patient.Contracts;
+using DentaCore.Scheduling.Contracts;
 using DentaCore.Patient.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -38,6 +40,9 @@ public static class DependencyInjection
         services.AddScoped<IModuleUnitOfWork>(sp => sp.GetRequiredService<PatientDbContext>());
         services.AddScoped<IPatientRepository, PatientRepository>();
         services.AddScoped<IPatientReadModel, PatientReadModel>();
+        services.AddScoped<PatientAccess>();
+        services.AddScoped<IPatientDirectory, PatientDirectory>();
+        services.TryAddScoped<ICareRelationships, NoCareRelationships>();   // Scheduling modulu qoşulubsa əvəz olunur
         return services;
     }
 }

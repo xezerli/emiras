@@ -8,6 +8,7 @@
     <ProjectReference Include="../../../BuildingBlocks/DentaCore.BuildingBlocks.Application/DentaCore.BuildingBlocks.Application.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../Scheduling/DentaCore.Scheduling.Contracts/DentaCore.Scheduling.Contracts.csproj" />
     <InternalsVisibleTo Include="DentaCore.Patient.UnitTests" />
   </ItemGroup>
 </Project>

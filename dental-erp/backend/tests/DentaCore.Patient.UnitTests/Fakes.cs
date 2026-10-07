@@ -68,6 +68,16 @@ internal sealed class FakeReadModel : IPatientReadModel
         Task.FromResult(new MedicalProfileData([], [], [], null));
 }
 
+internal sealed class FakeCare : DentaCore.Scheduling.Contracts.ICareRelationships
+{
+    public HashSet<(Guid Provider, Guid Patient)> Links { get; } = [];
+
+    public Task<bool> HasAsync(Guid providerId, Guid patientId, CancellationToken cancellationToken) => Task.FromResult(Links.Contains((providerId, patientId)));
+
+    public Task<IReadOnlyCollection<Guid>> PatientIdsAsync(Guid providerId, CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyCollection<Guid>>(Links.Where(l => l.Provider == providerId).Select(l => l.Patient).ToList());
+}
+
 internal static class Factory
 {
     public static readonly Guid BranchA = Guid.NewGuid();

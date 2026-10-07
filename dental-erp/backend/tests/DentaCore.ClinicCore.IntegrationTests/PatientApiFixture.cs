@@ -4,7 +4,17 @@ using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
 using DentaCore.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace DentaCore.Patient.IntegrationTests;
+namespace DentaCore.ClinicCore.IntegrationTests;
+
+/// <summary>
+/// Bütün host-səviyyəli testlər TƏK fixture və ardıcıl işləyir: host konfiqurasiyası process-global mühit dəyişənləri ilə verilir,
+/// iki fixture paralel işləsə bir-birinin JWT açarını əzərdi.
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class ClinicCoreDefinition : ICollectionFixture<PatientApiFixture>
+{
+    public const string Name = "clinic-core";
+}
 
 /// <summary>Bir PostgreSQL bazası, bir host, iki tenant, hər tenant-da iki filial. Testlər unikal data ilə bir-birinə mane olmur.</summary>
 public sealed class PatientApiFixture : IAsyncLifetime, IDisposable
@@ -65,6 +75,28 @@ public sealed class PatientApiFixture : IAsyncLifetime, IDisposable
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }
+
+    public async Task<Guid> SeedRoomAsync(Guid branch, string name)
+    {
+        var id = Guid.NewGuid();
+        await Db.ExecAsync(Demo, "INSERT INTO rooms(id, branch_id, name) VALUES ($1, $2, $3)", id, branch, name);
+        return id;
+    }
+
+    /// <summary>Həkimin iş qrafiki: həftənin bütün günləri, yerli vaxtla from–to.</summary>
+    public async Task SeedScheduleAsync(Guid provider, Guid branch, TimeOnly from, TimeOnly to)
+    {
+        for (var weekday = 1; weekday <= 7; weekday++)
+        {
+            await Db.ExecAsync(Demo, "INSERT INTO provider_schedules(provider_id, branch_id, weekday, start_time, end_time, valid_from) VALUES ($1, $2, $3, $4, $5, current_date - 30)",
+                provider, branch, (short)weekday, from, to);
+        }
+    }
+
+    public Task SeedTimeOffAsync(Guid provider, DateTimeOffset from, DateTimeOffset to) =>
+        Db.ExecAsync(Demo, "INSERT INTO time_off(provider_id, period, reason) VALUES ($1, tstzrange($2::timestamptz, $3::timestamptz), 'məzuniyyət')", provider, from.UtcDateTime, to.UtcDateTime);
+
+    public Task<Guid> SeedProviderAsync(string name = "Dr. Test") => Db.SeedUserAsync(Demo, $"dr-{Guid.NewGuid():N}@clinic.az", name, "doctor");
 
     public HttpClient Anonymous() => Factory!.CreateClientFor("demo");
 

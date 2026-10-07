@@ -9,6 +9,7 @@ public class RegisterAndGetHandlerTests
 {
     private readonly FakePatients _patients = new();
     private readonly FakePatientUow _uow = new();
+    private readonly FakeCare _care = new();
     private readonly DentaCore.BuildingBlocks.Infrastructure.Security.AesGcmPiiProtector _pii = Factory.Pii();
     private readonly Guid _me = Guid.NewGuid();
 
@@ -100,7 +101,7 @@ public class RegisterAndGetHandlerTests
     public async Task Get_outside_scope_looks_like_not_found()
     {
         var patient = await Seed(Factory.BranchB, _me);
-        var handler = new GetPatientQueryHandler(_patients, _pii, Factory.User(Guid.NewGuid(), ["patient:read@branch"], [Factory.BranchA.ToString()]));
+        var handler = new GetPatientQueryHandler(_patients, _pii, new PatientAccess(Factory.User(Guid.NewGuid(), ["patient:read@branch"], [Factory.BranchA.ToString()]), _care));
 
         var result = await handler.Handle(new GetPatientQuery(patient.Id, false), CancellationToken.None);
 
@@ -111,8 +112,8 @@ public class RegisterAndGetHandlerTests
     public async Task Reveal_needs_sensitive_permission_and_returns_plaintext_only_then()
     {
         var patient = await Seed(Factory.BranchA, _me);
-        var plain = new GetPatientQueryHandler(_patients, _pii, Factory.User(Guid.NewGuid(), ["patient:read@tenant"]));
-        var privileged = new GetPatientQueryHandler(_patients, _pii, Factory.User(Guid.NewGuid(), ["patient:read@tenant", "patient:read_sensitive@tenant"]));
+        var plain = new GetPatientQueryHandler(_patients, _pii, new PatientAccess(Factory.User(Guid.NewGuid(), ["patient:read@tenant"]), _care));
+        var privileged = new GetPatientQueryHandler(_patients, _pii, new PatientAccess(Factory.User(Guid.NewGuid(), ["patient:read@tenant", "patient:read_sensitive@tenant"]), _care));
 
         var denied = await plain.Handle(new GetPatientQuery(patient.Id, true), CancellationToken.None);
         var masked = await plain.Handle(new GetPatientQuery(patient.Id, false), CancellationToken.None);
@@ -130,10 +131,25 @@ public class RegisterAndGetHandlerTests
     {
         var mine = await Seed(Factory.BranchA, _me);
         var theirs = await Seed(Factory.BranchA, Guid.NewGuid());
-        var handler = new GetPatientQueryHandler(_patients, _pii, Factory.User(_me, ["patient:read@own"]));
+        var handler = new GetPatientQueryHandler(_patients, _pii, new PatientAccess(Factory.User(_me, ["patient:read@own"]), _care));
 
         Assert.True((await handler.Handle(new GetPatientQuery(mine.Id, false), CancellationToken.None)).IsSuccess);
         Assert.Equal(ErrorType.NotFound, (await handler.Handle(new GetPatientQuery(theirs.Id, false), CancellationToken.None)).Error!.Type);
+    }
+
+    [Fact]
+    public async Task Doctor_with_own_scope_sees_a_patient_once_an_appointment_links_them()
+    {
+        var patient = await Seed(Factory.BranchA, Guid.NewGuid());
+        var doctor = Guid.NewGuid();
+        var handler = new GetPatientQueryHandler(_patients, _pii, new PatientAccess(Factory.User(doctor, ["patient:read@own"]), _care));
+
+        var before = await handler.Handle(new GetPatientQuery(patient.Id, false), CancellationToken.None);
+        _care.Links.Add((doctor, patient.Id));
+        var after = await handler.Handle(new GetPatientQuery(patient.Id, false), CancellationToken.None);
+
+        Assert.Equal(ErrorType.NotFound, before.Error!.Type);
+        Assert.True(after.IsSuccess);
     }
 
     [Fact]
@@ -252,9 +268,10 @@ public class UpdateHandlerTests
 public class SearchHandlerTests
 {
     private readonly FakeReadModel _read = new();
+    private readonly FakeCare _care = new();
     private readonly DentaCore.BuildingBlocks.Infrastructure.Security.AesGcmPiiProtector _pii = Factory.Pii();
 
-    private SearchPatientsQueryHandler Handler(CurrentUser user) => new(_read, _pii, user, Factory.Opts());
+    private SearchPatientsQueryHandler Handler(CurrentUser user) => new(_read, _pii, user, Factory.Opts(), _care);
 
     private static CurrentUser User(params string[] perms) => Factory.User(Guid.NewGuid(), perms, [Factory.BranchA.ToString()]);
 
@@ -295,6 +312,19 @@ public class SearchHandlerTests
         var me = Guid.NewGuid();
         await Handler(Factory.User(me, ["patient:read@own"])).Handle(new SearchPatientsQuery(null, null, null), CancellationToken.None);
         Assert.Equal(me, _read.LastCriteria!.OwnerUserId);
+    }
+
+    [Fact]
+    public async Task Own_scope_search_includes_patients_the_doctor_is_treating()
+    {
+        var doctor = Guid.NewGuid();
+        var treated = Guid.NewGuid();
+        _care.Links.Add((doctor, treated));
+
+        await Handler(Factory.User(doctor, ["patient:read@own"])).Handle(new SearchPatientsQuery(null, null, null), CancellationToken.None);
+
+        Assert.Equal(doctor, _read.LastCriteria!.OwnerUserId);
+        Assert.Equal([treated], _read.LastCriteria.CarePatientIds);
     }
 
     [Fact]

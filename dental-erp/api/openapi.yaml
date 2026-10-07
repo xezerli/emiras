@@ -255,7 +255,7 @@ paths:
     post:
       operationId: postAppointments
       tags: [Scheduling]
-      summary: Qəbul yarat
+      summary: Qəbul yarat. Double-booking DB səviyyəsində bloklanır (409 appointment.overlap + alternativeSlots)
       x-permission: appointment:write
       parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
       requestBody:
@@ -765,8 +765,9 @@ components:
         start: { type: string, format: date-time }
         end: { type: string, format: date-time }
         reason: { type: string }
-        recurrenceRule: { type: string, description: RFC 5545 RRULE, examples: ['FREQ=WEEKLY;COUNT=4'] }
-        reminders: { type: array, items: { type: object, properties: { channel: { type: string }, minutesBefore: { type: integer } } } }
+        recurrenceRule: { type: string, description: 'RFC 5545 RRULE. HƏLƏ DƏSTƏKLƏNMİR (Faza 2): server bu sahəni nəzərə almır', examples: ['FREQ=WEEKLY;COUNT=4'] }
+        source: { type: string, enum: [reception, online, phone, ai, app], default: reception }
+        reminderMinutes: { type: array, maxItems: 5, items: { type: integer, minimum: 5, maximum: 43200 }, description: 'Başlanğıcdan neçə dəqiqə əvvəl xatırlat. Kanal pasiyentin preferredChannel-idir. Default [1440, 120]' }
     AppointmentUpdate:
       type: object
       properties:

@@ -41,8 +41,10 @@ internal sealed class PatientReadModel(PatientDbContext db) : IPatientReadModel
 
         if (c.OwnerUserId is { } owner)
         {
-            sql.Append(" AND p.created_by = @owner");
+            // own scope: özünün qeydiyyata aldığı VƏ YA onunla qəbulu olan pasiyentlər
+            sql.Append(" AND (p.created_by = @owner OR p.id = ANY(@care))");
             args.Add(new NpgsqlParameter("owner", NpgsqlDbType.Uuid) { Value = owner });
+            args.Add(new NpgsqlParameter("care", NpgsqlDbType.Array | NpgsqlDbType.Uuid) { Value = (c.CarePatientIds ?? []).ToArray() });
         }
 
         if (c.HasTextFilter)

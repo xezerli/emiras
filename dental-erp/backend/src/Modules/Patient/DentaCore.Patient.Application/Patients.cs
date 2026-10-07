@@ -4,6 +4,7 @@ using System.Text.Json;
 using DentaCore.BuildingBlocks.Application;
 using DentaCore.BuildingBlocks.Domain;
 using DentaCore.Patient.Domain;
+using DentaCore.Scheduling.Contracts;
 using FluentValidation;
 using Microsoft.Extensions.Options;
 
@@ -165,19 +166,19 @@ public sealed record GetPatientQuery(Guid Id, bool RevealSensitive) : IQuery<Pat
         new(RevealSensitive ? "patient.read.sensitive" : "patient.read", "patient", Id);
 }
 
-internal sealed class GetPatientQueryHandler(IPatientRepository patients, IPiiProtector pii, ICurrentUser user)
+internal sealed class GetPatientQueryHandler(IPatientRepository patients, IPiiProtector pii, PatientAccess access)
     : IRequestHandler<GetPatientQuery, PatientDto>
 {
     public async Task<Result<PatientDto>> Handle(GetPatientQuery request, CancellationToken cancellationToken)
     {
         var patient = await patients.GetAsync(request.Id, cancellationToken);
         // Scope xaricindəki pasiyent "tapılmadı" kimi cavablanır (mövcudluq sızmasın)
-        if (patient is null || !user.CanAccess(PatientPermissions.Read, patient.BranchId, patient.CreatedBy))
+        if (patient is null || !await access.CanAsync(PatientPermissions.Read, patient, cancellationToken))
         {
             return Error.NotFound("patient.not_found", "Patient not found.");
         }
 
-        if (request.RevealSensitive && !user.CanAccess(PatientPermissions.ReadSensitive, patient.BranchId, patient.CreatedBy))
+        if (request.RevealSensitive && !await access.CanAsync(PatientPermissions.ReadSensitive, patient, cancellationToken))
         {
             return Error.Forbidden("permission.denied", "You do not have permission to view sensitive data.");
         }
@@ -211,7 +212,7 @@ public sealed class SearchPatientsQueryValidator : AbstractValidator<SearchPatie
     }
 }
 
-internal sealed class SearchPatientsQueryHandler(IPatientReadModel readModel, IPiiProtector pii, ICurrentUser user, IOptions<PatientOptions> options)
+internal sealed class SearchPatientsQueryHandler(IPatientReadModel readModel, IPiiProtector pii, ICurrentUser user, IOptions<PatientOptions> options, ICareRelationships care)
     : IRequestHandler<SearchPatientsQuery, PatientPage>
 {
     public async Task<Result<PatientPage>> Handle(SearchPatientsQuery request, CancellationToken cancellationToken)
@@ -229,7 +230,9 @@ internal sealed class SearchPatientsQueryHandler(IPatientReadModel readModel, IP
         }
 
         var scope = user.ScopeOf(PatientPermissions.Read);
-        var criteria = BuildCriteria(request, scope, after);
+        // own scope: özünün qeydiyyata aldığı + baxdığı (qəbulu olan) pasiyentlər
+        var carePatients = scope == PermissionScope.Own ? await care.PatientIdsAsync(user.UserId, cancellationToken) : null;
+        var criteria = BuildCriteria(request, scope, after, carePatients);
         if (!string.IsNullOrWhiteSpace(request.Text) && !criteria.HasTextFilter)
         {
             // Mətn verilib, amma ad/telefon/FİN/kart nömrəsi kimi tanınmır (məs. "%", "_"): süzgəcsiz bütün siyahını qaytarmaq olmaz
@@ -246,7 +249,7 @@ internal sealed class SearchPatientsQueryHandler(IPatientReadModel readModel, IP
         return new PatientPage(items, next);
     }
 
-    private PatientSearchCriteria BuildCriteria(SearchPatientsQuery request, PermissionScope? scope, (DateTimeOffset, Guid)? after)
+    private PatientSearchCriteria BuildCriteria(SearchPatientsQuery request, PermissionScope? scope, (DateTimeOffset, Guid)? after, IReadOnlyCollection<Guid>? carePatients)
     {
         var text = request.Text?.Trim() ?? string.Empty;
         var tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -282,6 +285,7 @@ internal sealed class SearchPatientsQueryHandler(IPatientReadModel readModel, IP
             nameTokens, phoneHash, nidHash, chartNo, request.BranchId,
             scope == PermissionScope.Own ? [] : user.BranchFilterFor(PatientPermissions.Read),
             scope == PermissionScope.Own ? user.UserId : null,
+            carePatients,
             after, request.Limit + 1);
     }
 }
@@ -556,12 +560,12 @@ public sealed class AddAllergyCommandValidator : AbstractValidator<AddAllergyCom
     }
 }
 
-internal sealed class AddAllergyCommandHandler(IPatientRepository patients, ICurrentUser user) : IRequestHandler<AddAllergyCommand, AllergyDto>
+internal sealed class AddAllergyCommandHandler(IPatientRepository patients, PatientAccess access) : IRequestHandler<AddAllergyCommand, AllergyDto>
 {
     public async Task<Result<AllergyDto>> Handle(AddAllergyCommand request, CancellationToken cancellationToken)
     {
         var patient = await patients.GetAsync(request.PatientId, cancellationToken);
-        if (patient is null || !user.CanAccess(PatientPermissions.ClinicalWrite, patient.BranchId, patient.CreatedBy))
+        if (patient is null || !await access.CanAsync(PatientPermissions.ClinicalWrite, patient, cancellationToken))
         {
             return Error.NotFound("patient.not_found", "Patient not found.");
         }
@@ -590,13 +594,13 @@ public sealed record GetMedicalProfileQuery(Guid PatientId) : IQuery<MedicalProf
     public AuditDescriptor Describe(MedicalProfileDto response) => new("patient.medical_profile.read", "patient", PatientId);
 }
 
-internal sealed class GetMedicalProfileQueryHandler(IPatientRepository patients, IPatientReadModel readModel, ICurrentUser user)
+internal sealed class GetMedicalProfileQueryHandler(IPatientRepository patients, IPatientReadModel readModel, PatientAccess access)
     : IRequestHandler<GetMedicalProfileQuery, MedicalProfileDto>
 {
     public async Task<Result<MedicalProfileDto>> Handle(GetMedicalProfileQuery request, CancellationToken cancellationToken)
     {
         var patient = await patients.GetAsync(request.PatientId, cancellationToken);
-        if (patient is null || !user.CanAccess(PatientPermissions.ClinicalRead, patient.BranchId, patient.CreatedBy))
+        if (patient is null || !await access.CanAsync(PatientPermissions.ClinicalRead, patient, cancellationToken))
         {
             return Error.NotFound("patient.not_found", "Patient not found.");
         }

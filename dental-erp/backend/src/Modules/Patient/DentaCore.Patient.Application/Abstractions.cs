@@ -1,5 +1,6 @@
 using DentaCore.BuildingBlocks.Application;
 using DentaCore.Patient.Domain;
+using DentaCore.Scheduling.Contracts;
 
 namespace DentaCore.Patient.Application;
 
@@ -43,6 +44,7 @@ public sealed record PatientSearchCriteria(
     Guid? BranchId,
     IReadOnlyCollection<Guid>? AllowedBranchIds,
     Guid? OwnerUserId,
+    IReadOnlyCollection<Guid>? CarePatientIds,
     (DateTimeOffset CreatedAt, Guid Id)? After,
     int Limit)
 {
@@ -67,4 +69,22 @@ public interface IPatientReadModel
     Task<IReadOnlyList<PatientListRow>> SearchAsync(PatientSearchCriteria criteria, CancellationToken cancellationToken);
 
     Task<MedicalProfileData> GetMedicalProfileAsync(Guid patientId, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Pasiyentə giriş qərarı. <c>own</c> scope-lu istifadəçi (həkim) üçün "öz pasiyenti": özünün qeydiyyata aldığı
+/// VƏ YA onunla (ləğv olunmamış) qəbulu olan pasiyent (Scheduling modulunun ICareRelationships kontraktı).
+/// </summary>
+public sealed class PatientAccess(ICurrentUser user, ICareRelationships care)
+{
+    public async Task<bool> CanAsync(string permission, Domain.Patient patient, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(patient);
+        if (user.CanAccess(permission, patient.BranchId, patient.CreatedBy))
+        {
+            return true;
+        }
+
+        return user.ScopeOf(permission) == PermissionScope.Own && await care.HasAsync(user.UserId, patient.Id, cancellationToken);
+    }
 }

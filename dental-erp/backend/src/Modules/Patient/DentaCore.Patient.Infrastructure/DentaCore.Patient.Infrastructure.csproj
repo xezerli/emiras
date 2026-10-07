@@ -9,6 +9,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../DentaCore.Patient.Application/DentaCore.Patient.Application.csproj" />
+    <ProjectReference Include="../DentaCore.Patient.Contracts/DentaCore.Patient.Contracts.csproj" />
     <ProjectReference Include="../../../BuildingBlocks/DentaCore.BuildingBlocks.Infrastructure/DentaCore.BuildingBlocks.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

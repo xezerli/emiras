@@ -6,7 +6,7 @@
 |---|---|---|
 | 1 | BuildingBlocks + Identity (login, JWT, refresh rotasiyası, tenant həlli, outbox) | ✅ Tamamlandı |
 | 2 | Patient (qeydiyyat, axtarış, tibbi profil) + RBAC scope + hash-chain audit | ✅ Tamamlandı |
-| 3 | Scheduling (qəbul, double-booking, növbə, xatırlatma) | Növbəti |
+| 3 | Scheduling (qəbul, double-booking, boş slotlar, növbə, no-show, xatırlatma planı) | ✅ Tamamlandı |
 | 4 | Clinical (vizit, odontoqram, plan, resept, qeyd) | |
 | 5 | Billing (faktura, ödəniş, kassa smeni, refund) + vizit→faktura saga | |
 | 6 | Audit, Outbox publisher (RabbitMQ), Notify (SignalR), Gateway (YARP) | |
@@ -157,4 +157,72 @@ Patient inteqrasiya testləri 3 dəfə ardıcıl işlədildi, hamısı yaşıl.
 - **Rate limit və forwarded headers** hələ yalnız Identity-dədir (Gateway dilimində).
 - Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, Testcontainers) qüvvədə qalır.
 
-> Növbəti dilim: **Scheduling** (qəbul yaratma, DB səviyyəsində double-booking qorunması ilə uyğunlaşdırma, boş slotlar, check-in/növbə, no-show, xatırlatma planlaması). Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 3: Scheduling
+
+### Nə yazıldı
+
+**Domen (`Scheduling.Domain`):**
+- `Appointment` aggregate: `Book`, `Reschedule`, `CheckIn`, `Cancel`, `MarkNoShow` və status maşını. Qaydalar: müddət 5 dəq–8 saat, keçmişdə başlaya bilməz (5 dəq tolerans: gələn pasiyent), 2 ildən uzaq olmaz, check-in başlanğıcdan 2 saat əvvəldən bitməyə qədər, no-show yalnız başlanğıcdan sonra.
+- `TimeSlot`: yarı açıq `[Start, End)`. 10:00–10:30 və 10:30–11:00 üst-üstə düşmür.
+- `SchedulePlanner` (təmiz, I/O-suz): iş qrafiki yoxlaması, boş slot hesablanması, xatırlatma planı. Yerli (Bakı) vaxt ↔ UTC çevrilməsi bir yerdə.
+- `QueueTicket`, `AppointmentReminder`, `WaitlistEntry`.
+
+**Application / Infrastructure:**
+- Əmrlər: `BookAppointment`, `RescheduleAppointment` (merge-patch: yalnız `start` verilsə müddət qorunur, sürüklə-burax üçün), `CancelAppointment`, `MarkNoShow`, `CheckIn`, `CallTicket`, `AddToWaitlist`. Sorğular: `GetAppointment`, `ListAppointments` (aralıq ≤ 62 gün), `GetAvailability`, `GetQueue`.
+- Endpoint-lər (`ClinicCore.Api`): `/v1/appointments` (CRUD, `/availability`, `/check-in`, `/cancel`, `/no-show`), `/v1/queue`, `/v1/queue/{id}/call`, `/v1/waitlist`.
+- **Modul kontraktları:** `Patient.Contracts.IPatientDirectory` (Scheduling pasiyentin adını/filialını bu kontraktla öyrənir) və `Scheduling.Contracts.ICareRelationships` ("baxan həkim"). Modullar bir-birinin daxilini görmür, arxitektura testi bunu yoxlayır.
+- `ConstraintViolationException`: infrastruktur PostgreSQL constraint xətalarını (exclusion, unique, FK) Application qatının başa düşdüyü tipə çevirir.
+
+### Əsas qərarlar
+
+| Qərar | Səbəb |
+|---|---|
+| Double-booking-in **son hakimi DB-dəki `EXCLUDE` constraint-dir**. Tətbiq "əvvəlcə yoxla, sonra yaz" etmir | Yoxla-yaz yarışa açıqdır. 10 paralel sorğu testində tam 1 qəbul yaranır |
+| Overlap-da 409 + **3 alternativ boş slot** (`alternativeSlots`) | UX sənədindəki söz: rədd etmək yox, çıxış yolu göstərmək |
+| İş qrafiki heç təyin olunmayıbsa məhdudiyyət yoxdur | Yeni klinika qrafiki doldurana qədər işləyə bilsin. Qrafik var, həmin gün yoxdursa: iş günü deyil |
+| Check-in bilet nömrəsi **advisory lock** altında verilir | 8 paralel check-in testində 1..8 təkrarsız və boşluqsuz |
+| Ləğv/no-show/yenidən planlama zamanı gözləyən xatırlatmalar eyni tranzaksiyada ləğv olunur | Ləğv olunmuş qəbula SMS getməsin |
+| Xatırlatma planı kanal olaraq pasiyentin `preferredChannel`-ını işlədir, `none` isə heç nə yaratmır | Pasiyentin seçimi |
+| Scope xaricindəki qəbul 404 qaytarır, növbə yalnız filial/tenant scope ilə görünür | Mövcudluq sızmasın. Lobbi növbəsi filial səviyyəsindədir |
+| Audit: `appointment.create/read/list/update/cancel/check_in/no_show`, `queue.read/call`, `waitlist.add`. Ad və səbəb auditə yazılmır | PHI audit-ə sızmasın |
+
+### "Baxan həkim" əlaqəsi (Dilim 2 məhdudiyyətinin həlli)
+
+Həkimin pasiyentlə (ləğv olunmamış) qəbulu varsa, pasiyent onun `own` scope-una daxildir: `GET /patients/{id}`, tibbi profil, allergiya əlavəsi və axtarış. Qəbul ləğv olunanda əlaqə yox olur. Bu, inteqrasiya testində başdan sona yoxlanılır (qəbul yox: 404, qəbul var: 200, ləğv: yenə 404).
+
+### Testlər (253 test, hamısı keçir)
+
+| Layer | Say |
+|---|---|
+| Architecture | 7 |
+| BuildingBlocks unit | 16 |
+| Identity unit / integration | 44 / 16 |
+| Patient unit | 64 |
+| Scheduling unit | 65 |
+| ClinicCore integration (Patient + Scheduling, real PostgreSQL və real HTTP host) | 41 |
+
+Scheduling unit testləri: domen status maşını və pəncərə sərhədləri, slot hesablanması (məşğul/məzuniyyət/keçmiş/bir neçə pəncərə, Bakı UTC+4), xatırlatma planı, handler-lər (scope, konflikt xəritələməsi, alternativlər, tranzaksiya sərhədləri). İnteqrasiya testləri: 10 paralel eyni slot, ardıcıl slotlar, otaq konflikti, iş saatı/məzuniyyət, availability ilə real rezerv uyğunluğu, reschedule + ETag + 412/428, 8 paralel check-in, no-show, list filtrləri və scope, baxan həkim, audit zənciri, tenant izolyasiyası. İnteqrasiya testləri 3 dəfə ardıcıl işlədildi, hamısı yaşıl.
+
+### Testlərin tapdığı real bug-lar (düzəldilib)
+
+1. **Ardıcıl qəbullar üst-üstə düşürdü:** Npgsql-in `NpgsqlRange(lower, upper)` konstruktoru **hər iki sərhədi daxil edir** (`[a,b]`). 10:00–10:30 qəbulundan sonra 10:30–11:00 DB-də konflikt verirdi. Üst sərhəd açıq göstərilir, testdə saxlanan aralığın `[...)` formatı yoxlanılır. Bu xəta kod oxuyarkən görünmürdü, yalnız real DB testi tutdu.
+2. **EF xatırlatmaları qəbuldan əvvəl yazırdı** (FK pozuntusu, 500): reminder ilə appointment arasında əlaqə modeldə bəyan olunmamışdı və EF insert sırasını bilmirdi. FK modeldə bəyan olundu.
+3. **Paralel test sinifləri bir-birinin JWT açarını əzirdi:** host konfiqurasiyası process-global mühit dəyişənləri ilə verilir. İndi bütün host testləri tək collection fixture-da ardıcıl işləyir.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Təkrarlanan qəbul (`recurrenceRule`) yoxdur** (OpenAPI-də qeyd olunub, Faza 2).
+- **Xatırlatmalar yalnız planlanır** (`appointment_reminders`), göndərən worker və SMS/WhatsApp provayderləri yoxdur (Dilim 6 və Communication modulu).
+- **Wait list yalnız əlavə olunur.** Ləğv olunan slot üçün avtomatik təklif və siyahıya baxış yoxdur.
+- **no_show_count / risk skoru yenilənmir:** `AppointmentMissed` hadisəsi outbox-a düşür, amma onu Patient modulunda işləyən consumer (RabbitMQ publisher, Dilim 6) hələ yoxdur.
+- **Provayder yoxlaması yalnız mövcudluqdur** (FK). Provayderin həkim rolunda olması, aktiv olması yoxlanılmır (Identity Contracts ilə gələcək).
+- **İş qrafiki yalnız oxunur:** `provider_schedules` və `time_off` üçün idarəetmə endpoint-ləri (HR/Admin dilimi) yoxdur, testlər onları SQL ilə yaradır.
+- **Otaq və filial məlumatı** (`rooms`) üçün ayrıca Organization modulu hələ yoxdur: Scheduling bu cədvəli oxu modeli ilə birbaşa sorğulayır.
+- **`Scheduling:TimeZone`** klinika üçün tək IANA qurşağıdır (default `Asia/Baku`). Filial üzrə fərqli qurşaq dəstəklənmir. Tenant-ın `timezone` sahəsi ilə avtomatik uyğunlaşdırma yoxdur.
+- **Real-time yeniləmə (SignalR) və Google/Outlook sinxronu yoxdur.** Təqvim indi yalnız sorğu ilə yenilənir.
+- **`start`/`complete` statusları** Clinical dilimində vizitlə birgə gələcək.
+- Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, audit partition job-u, Idempotency-Key, Testcontainers) qüvvədə qalır.
+
+> Növbəti dilim: **Clinical** (vizit, interaktiv odontoqram qeydləri tarixçə ilə, müalicə planı, resept allergiya yoxlaması ilə, imzalanan klinik qeyd). Davam etmək üçün **"Davam et"** yazın.

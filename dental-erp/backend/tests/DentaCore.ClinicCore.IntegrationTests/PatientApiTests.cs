@@ -4,9 +4,10 @@ using System.Text;
 using System.Text.Json;
 using DentaCore.TestSupport;
 
-namespace DentaCore.Patient.IntegrationTests;
+namespace DentaCore.ClinicCore.IntegrationTests;
 
-public sealed class PatientApiTests(PatientApiFixture f) : IClassFixture<PatientApiFixture>
+[Collection(ClinicCoreDefinition.Name)]
+public sealed class PatientApiTests(PatientApiFixture f)
 {
     private static string Unique() => "Zq" + Guid.NewGuid().ToString("N")[..8];
 
