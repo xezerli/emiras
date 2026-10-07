@@ -77,3 +77,63 @@ public sealed partial class LoggingBehavior<TRequest, TResponse>(ILogger<Logging
     [LoggerMessage(Level = LogLevel.Information, Message = "{Request} failed with {ErrorCode}")]
     private static partial void LogFailed(ILogger logger, string request, string errorCode);
 }
+
+/// <summary>İcazəni handler-dən əvvəl yoxlayır. Rədd halı da auditə düşür ("kim nəyə icazəsiz cəhd etdi").</summary>
+public sealed class AuthorizationBehavior<TRequest, TResponse>(ICurrentUser currentUser, IEnumerable<IAuditTrail> audit, IClock clock)
+    : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    public async Task<Result<TResponse>> Handle(TRequest request, PipelineNext<TResponse> next, CancellationToken cancellationToken)
+    {
+        if (request is not IRequiresAccess required)
+        {
+            return await next();
+        }
+
+        if (!currentUser.IsAuthenticated)
+        {
+            return Error.Unauthorized("auth.required", "Authentication is required.");
+        }
+
+        if (currentUser.ScopeOf(required.Permission) is null)
+        {
+            var trail = audit.FirstOrDefault();
+            if (trail is not null)
+            {
+                await trail.RecordAsync(
+                    new AuditRecord("permission.denied", null, null, currentUser.UserId, currentUser.Ip?.ToString(), clock.UtcNow, $"{{\"permission\":\"{required.Permission}\",\"request\":\"{typeof(TRequest).Name}\"}}"),
+                    cancellationToken);
+            }
+
+            return Error.Forbidden("permission.denied", "You do not have permission to perform this action.");
+        }
+
+        return await next();
+    }
+}
+
+/// <summary>
+/// Uğurlu IAuditable sorğunu audit zəncirinə yazır. UnitOfWork-dan XARİCDƏ dayanır: dəyişiklik saxlandıqdan sonra işləyir.
+/// Audit yazıla bilmirsə sorğu uğursuz olur (fail-closed): audit olunmamış PHI girişi qəbul edilmir.
+/// </summary>
+public sealed class AuditBehavior<TRequest, TResponse>(ICurrentUser currentUser, IEnumerable<IAuditTrail> audit, IClock clock)
+    : IPipelineBehavior<TRequest, TResponse>
+    where TRequest : IRequest<TResponse>
+{
+    public async Task<Result<TResponse>> Handle(TRequest request, PipelineNext<TResponse> next, CancellationToken cancellationToken)
+    {
+        var result = await next();
+        if (result.IsFailure || request is not IAuditable<TResponse> auditable)
+        {
+            return result;
+        }
+
+        var trail = audit.FirstOrDefault()
+            ?? throw new InvalidOperationException($"{typeof(TRequest).Name} is auditable but no IAuditTrail is registered.");
+        var d = auditable.Describe(result.Value);
+        await trail.RecordAsync(
+            new AuditRecord(d.Action, d.Entity, d.EntityId, currentUser.IsAuthenticated ? currentUser.UserId : null, currentUser.Ip?.ToString(), clock.UtcNow, d.DetailsJson),
+            cancellationToken);
+        return result;
+    }
+}

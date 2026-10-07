@@ -85,7 +85,7 @@ internal sealed class FakeUsers : IUserRepository
         Task.FromResult<IReadOnlyList<string>>(AllowedIps);
 
     public Task<UserAccess> GetAccessAsync(Guid userId, string fullName, CancellationToken cancellationToken) =>
-        Task.FromResult(new UserAccess(userId, fullName, ["reception"], [new PermissionGrant("patient:read", "branch")]));
+        Task.FromResult(new UserAccess(userId, fullName, ["reception"], [new PermissionGrant("patient:read", "branch")], [], true));
 }
 
 internal sealed class FakeRefreshTokens : IRefreshTokenRepository

@@ -11,7 +11,7 @@
     <PackageReference Include="Npgsql" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/Hosts/DentaCore.Identity.Api/DentaCore.Identity.Api.csproj" />
+    <ProjectReference Include="../../src/Hosts/DentaCore.ClinicCore.Api/DentaCore.ClinicCore.Api.csproj" />
     <ProjectReference Include="../DentaCore.TestSupport/DentaCore.TestSupport.csproj" />
   </ItemGroup>
 </Project>

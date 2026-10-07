@@ -114,9 +114,11 @@ paths:
     post:
       operationId: postPatients
       tags: [Patients]
-      summary: Yeni pasiyent
+      summary: Yeni pasiyent (eyni telefon/FİN varsa 409 patient.duplicate; ailə üzvləri üçün confirmDuplicate=true)
       x-permission: patient:write
-      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { name: confirmDuplicate, in: query, schema: { type: boolean, default: false }, description: Dublikat xəbərdarlığına baxmayaraq yarat }
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/PatientCreate' } } }
@@ -129,8 +131,10 @@ paths:
     get:
       operationId: getPatientsByPatient
       tags: [Patients]
-      summary: Pasiyent kartı (audit-ə yazılır)
+      summary: Pasiyent kartı (audit-ə yazılır). Telefon/email/FİN default maskalıdır
       x-permission: patient:read
+      parameters:
+        - { name: reveal, in: query, schema: { type: boolean, default: false }, description: 'Maskasız dəyərlər. patient:read_sensitive tələb edir və patient.read.sensitive kimi audit olunur' }
       responses:
         '200': { description: OK, headers: { ETag: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/Patient' } } } }
         '404': { $ref: '#/components/responses/Problem' }
@@ -146,6 +150,7 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Patient' } } } }
         '412': { $ref: '#/components/responses/Problem' }
+        '428': { description: If-Match header-i yoxdur, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
     delete:
       operationId: deletePatientsByPatient
       tags: [Patients]
@@ -711,7 +716,8 @@ components:
             noShowCount: { type: integer }
             riskScore: { type: [number, 'null'] }
             hasSevereAllergy: { type: boolean, description: UI-da qırmızı bayraq üçün }
-            balance: { type: number, description: Cari borc }
+            sensitiveRevealed: { type: boolean, description: 'true olduqda phone/email/nationalId maskasızdır' }
+            balance: { type: number, description: 'Cari borc. Billing modulu hazır olana qədər qaytarılmır' }
             rowVersion: { type: integer }
             createdAt: { type: string, format: date-time }
     PatientPage:

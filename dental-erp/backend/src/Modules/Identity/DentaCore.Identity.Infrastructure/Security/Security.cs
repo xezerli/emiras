@@ -143,6 +143,8 @@ public sealed class JwtAccessTokenIssuer(IOptions<JwtOptions> options, JwtKeyPro
             ["role"] = access.Roles.ToArray(),
             // "code@scope": token şişməsin deyə yalnız ad və scope. Məbləğ limitləri (max_amount) DB-dən yoxlanılır.
             ["perm"] = access.Permissions.Select(p => $"{p.Code}@{p.Scope}").ToArray(),
+            // Filial scope-u: "*" = bütün filiallar, əks halda filial id-ləri (branch scope-lu icazələr üçün)
+            ["branch"] = access.AllBranches ? new[] { "*" } : access.BranchIds.Select(b => b.ToString()).ToArray(),
         };
 
         var descriptor = new SecurityTokenDescriptor

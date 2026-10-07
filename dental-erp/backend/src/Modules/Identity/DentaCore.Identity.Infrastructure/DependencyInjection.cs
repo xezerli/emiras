@@ -1,4 +1,5 @@
 using DentaCore.BuildingBlocks.Application;
+using DentaCore.BuildingBlocks.Infrastructure.Auth;
 using DentaCore.BuildingBlocks.Infrastructure.Outbox;
 using DentaCore.BuildingBlocks.Infrastructure.Security;
 using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
@@ -23,11 +24,12 @@ public static class DependencyInjection
 
         services.AddApplicationCore(typeof(LoginCommand).Assembly);
         services.AddTenancy(configuration);
+        services.AddRequestContext();
 
         services.Configure<JwtOptions>(configuration.GetSection(JwtOptions.Section));
         services.Configure<PiiOptions>(configuration.GetSection(PiiOptions.Section));
         services.AddSingleton<JwtKeyProvider>();
-        services.AddSingleton<IPiiProtector, AesGcmPiiProtector>();
+        services.TryAddSingleton<IPiiProtector, AesGcmPiiProtector>();
         services.AddSingleton<IPasswordHasher, Argon2idPasswordHasher>();
         services.AddSingleton<IRefreshTokenFactory, RefreshTokenFactory>();
         services.AddSingleton<IAccessTokenIssuer, JwtAccessTokenIssuer>();

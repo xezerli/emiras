@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -37,7 +38,8 @@ public sealed class TenantContext : ITenantContext
 
     private TenantInfo Required => _tenant ?? throw new InvalidOperationException("Tenant is not resolved for this request.");
 
-    internal void Set(TenantInfo tenant) => _tenant = tenant;
+    /// <summary>Middleware və testlər/fon işləri üçün (HTTP sorğusu olmayan kontekstdə tenant təyini).</summary>
+    public void Set(TenantInfo tenant) => _tenant = tenant;
 }
 
 public interface ITenantDirectory
@@ -176,12 +178,13 @@ public static class TenancyServiceCollectionExtensions
     {
         services.Configure<TenancyOptions>(configuration.GetSection(TenancyOptions.Section));
         services.AddMemoryCache();
-        services.AddSingleton(_ => NpgsqlDataSource.Create(configuration.GetConnectionString("Default")
+        // TryAdd: bir host-da bir neçə modul AddTenancy çağıra bilər
+        services.TryAddSingleton(_ => NpgsqlDataSource.Create(configuration.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default is required.")));
-        services.AddSingleton<ITenantDirectory, NpgsqlTenantDirectory>();
-        services.AddSingleton<ITenantDataSources, TenantDataSources>();
-        services.AddScoped<TenantContext>();
-        services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<TenantContext>());
+        services.TryAddSingleton<ITenantDirectory, NpgsqlTenantDirectory>();
+        services.TryAddSingleton<ITenantDataSources, TenantDataSources>();
+        services.TryAddScoped<TenantContext>();
+        services.TryAddScoped<ITenantContext>(sp => sp.GetRequiredService<TenantContext>());
         return services;
     }
 }

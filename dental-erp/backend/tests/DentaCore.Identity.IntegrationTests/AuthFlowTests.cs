@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using DentaCore.TestSupport;
 using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace DentaCore.Identity.IntegrationTests;
@@ -8,7 +9,8 @@ namespace DentaCore.Identity.IntegrationTests;
 public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
 {
     private readonly PostgresFixture _db;
-    private readonly ApiFactory _factory;
+    private readonly ApiFactory<Program> _factory;
+    private readonly TestKeys _keys = new();
     private readonly HttpClient _client;
 
     public AuthFlowTests(PostgresFixture db)
@@ -17,7 +19,7 @@ public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
         // Skip olunan testlərdə fixture boşdur, host yaradılmır
         if (!string.IsNullOrEmpty(db.ConnectionString))
         {
-            _factory = new ApiFactory(db);
+            _factory = new ApiFactory<Program>(db, ("Jwt__SigningKeyPem", _keys.PrivatePem));
             _client = _factory.CreateClientFor("demo");
         }
         else
@@ -31,6 +33,7 @@ public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
     {
         _client?.Dispose();
         _factory?.Dispose();
+        _keys.Dispose();
     }
 
     private static string NewEmail() => $"user-{Guid.NewGuid():N}@clinic.az";

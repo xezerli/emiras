@@ -27,6 +27,7 @@ public class PipelineTests
         services.AddSingleton<IAccessTokenIssuer, FakeTokenIssuer>();
         services.AddSingleton<IRefreshTokenFactory, DentaCore.Identity.Infrastructure.Security.RefreshTokenFactory>();
         services.AddSingleton<ITenantContext, FakeTenant>();
+        services.AddSingleton<ICurrentUser>(CurrentUser.Anonymous);
         services.AddSingleton(uow);
         services.AddSingleton<IIdentityUnitOfWork>(uow);
         services.AddSingleton<IModuleUnitOfWork>(uow);

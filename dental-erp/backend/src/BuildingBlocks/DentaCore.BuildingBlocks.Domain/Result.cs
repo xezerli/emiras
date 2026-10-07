@@ -7,6 +7,7 @@ public enum ErrorType
     Forbidden,
     NotFound,
     Conflict,
+    PreconditionFailed,
     Locked,
     Failure,
 }
@@ -14,6 +15,9 @@ public enum ErrorType
 /// <summary>Gözlənilən biznes xətası. İstisna (exception) yalnız gözlənilməz hallar üçündür.</summary>
 public sealed record Error(string Code, string Message, ErrorType Type)
 {
+    /// <summary>Müştəriyə qaytarılan əlavə məlumat (məs. dublikat pasiyentin id-si). PHI daşımamalıdır.</summary>
+    public IReadOnlyDictionary<string, object?>? Details { get; init; }
+
     public static Error Validation(string code, string message) => new(code, message, ErrorType.Validation);
 
     public static Error Unauthorized(string code, string message) => new(code, message, ErrorType.Unauthorized);
@@ -23,6 +27,8 @@ public sealed record Error(string Code, string Message, ErrorType Type)
     public static Error NotFound(string code, string message) => new(code, message, ErrorType.NotFound);
 
     public static Error Conflict(string code, string message) => new(code, message, ErrorType.Conflict);
+
+    public static Error PreconditionFailed(string code, string message) => new(code, message, ErrorType.PreconditionFailed);
 
     public static Error Locked(string code, string message) => new(code, message, ErrorType.Locked);
 }

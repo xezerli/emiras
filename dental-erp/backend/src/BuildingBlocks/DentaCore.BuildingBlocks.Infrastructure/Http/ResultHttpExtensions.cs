@@ -16,6 +16,7 @@ public static class ResultHttpExtensions
             ErrorType.Forbidden => StatusCodes.Status403Forbidden,
             ErrorType.NotFound => StatusCodes.Status404NotFound,
             ErrorType.Conflict => StatusCodes.Status409Conflict,
+            ErrorType.PreconditionFailed => StatusCodes.Status412PreconditionFailed,
             ErrorType.Locked => StatusCodes.Status423Locked,
             _ => StatusCodes.Status500InternalServerError,
         };
@@ -24,7 +25,21 @@ public static class ResultHttpExtensions
             statusCode: status,
             title: error.Message,
             type: $"https://errors.dentacore.app/{error.Code}",
-            extensions: new Dictionary<string, object?> { ["code"] = error.Code });
+            extensions: ExtensionsOf(error));
+    }
+
+    private static Dictionary<string, object?> ExtensionsOf(Error error)
+    {
+        var extensions = new Dictionary<string, object?> { ["code"] = error.Code };
+        if (error.Details is not null)
+        {
+            foreach (var (key, value) in error.Details)
+            {
+                extensions[key] = value;
+            }
+        }
+
+        return extensions;
     }
 
     public static IResult ToHttpResult<T>(this Result<T> result, Func<T, IResult> onSuccess)

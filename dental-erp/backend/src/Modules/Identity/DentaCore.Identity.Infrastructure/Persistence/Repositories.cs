@@ -34,12 +34,21 @@ internal sealed class UserRepository(IdentityDbContext db) : IUserRepository
             .OrderBy(p => p.Code, StringComparer.Ordinal)
             .ToList();
 
-        return new UserAccess(userId, fullName, roles, permissions);
+        // user_roles.branch_id NULL = bütün filiallar
+        var branchRows = await db.Database
+            .SqlQuery<BranchRow>($"SELECT ur.branch_id FROM user_roles ur WHERE ur.user_id = {userId}")
+            .ToListAsync(cancellationToken);
+        var allBranches = branchRows.Any(b => b.BranchId is null);
+        var branchIds = allBranches ? [] : branchRows.Select(b => b.BranchId!.Value).Distinct().ToList();
+
+        return new UserAccess(userId, fullName, roles, permissions, branchIds, allBranches);
     }
 
     private static int ScopeRank(string scope) => scope switch { "tenant" => 3, "branch" => 2, _ => 1 };
 
     private sealed record PermissionRow(string Code, string Scope);
+
+    private sealed record BranchRow(Guid? BranchId);
 }
 
 internal sealed class RefreshTokenRepository(IdentityDbContext db) : IRefreshTokenRepository

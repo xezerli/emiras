@@ -5,8 +5,8 @@
 | # | Dilim | Status |
 |---|---|---|
 | 1 | BuildingBlocks + Identity (login, JWT, refresh rotasiyası, tenant həlli, outbox) | ✅ Tamamlandı |
-| 2 | Patient (qeydiyyat, axtarış, tibbi profil, audit) | Növbəti |
-| 3 | Scheduling (qəbul, double-booking, növbə, xatırlatma) | |
+| 2 | Patient (qeydiyyat, axtarış, tibbi profil) + RBAC scope + hash-chain audit | ✅ Tamamlandı |
+| 3 | Scheduling (qəbul, double-booking, növbə, xatırlatma) | Növbəti |
 | 4 | Clinical (vizit, odontoqram, plan, resept, qeyd) | |
 | 5 | Billing (faktura, ödəniş, kassa smeni, refund) + vizit→faktura saga | |
 | 6 | Audit, Outbox publisher (RabbitMQ), Notify (SignalR), Gateway (YARP) | |
@@ -89,4 +89,72 @@ Unit testlər (fake ilə) keçirdi, real DB testi isə iki problemi tapdı:
 - Testlər .NET 10 runtime üzərində `DOTNET_ROLL_FORWARD=Major` ilə işləyir (Mərhələ 6 §8).
 - `appsettings` içində sirr yoxdur. Açarlar mühit dəyişəni ilə verilməlidir: `Security__PiiEncryptionKey`, `Security__PiiHashKey` (`openssl rand -base64 32`, fərqli olmalıdırlar), `Jwt__SigningKeyPem` (RSA-2048 PKCS#8), `ConnectionStrings__Default`.
 
-> Növbəti dilim: **Patient** (qeydiyyat + dublikat yoxlaması, axtarış, tibbi profil, hər oxumanın auditi, şifrələnmiş telefon/email/FİN, RBAC icazə yoxlaması). Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 2: Patient, RBAC scope və audit zənciri
+
+### Nə yazıldı
+
+**Ümumi infrastruktur (BuildingBlocks):**
+- `CurrentUser`: JWT `perm` (`code@scope`) və `branch` claim-lərindən icazə modeli. `tenant` hamısını, `branch` istifadəçinin filiallarını, `own` yalnız özünün yaratdığını görür. DB-dən və HTTP-dən asılı deyil, tam unit-test olunub.
+- Pipeline genişləndi: `Logging → Authorization → Validation → Audit → UnitOfWork`. Sorğu `IRequiresAccess` daşıyırsa icazə handler-dən əvvəl yoxlanılır, `IAuditable` daşıyırsa uğurlu nəticədən sonra audit zəncirinə yazılır.
+- `Optional<T>`: JSON Merge Patch-də "sahə göndərilməyib" ilə "null göndərilib" fərqi.
+- `412 Precondition Failed` (`If-Match`), `ConcurrencyExceptionMiddleware` (EF konkurrensi toqquşması → 412), `Error.Details` (məs. dublikat pasiyentin id-si).
+- `AddJwtValidation`: Identity-dən başqa host-lar JWT-ni yalnız public açarla (`Jwt__PublicKeyPem`) yoxlayır.
+
+**Audit modulu:** `audit_log` zənciri. Hər qeyd əvvəlkinin heş-ini daşıyır. Heş **DB-də** hesablanır (jsonb/inet saxlanarkən normallaşdığı üçün tətbiqdə hesablanan heş sonradan yoxlananda uyğun gəlməzdi). Yazılar tenant üzrə advisory lock ilə ardıcıllaşdırılır. `IAuditChainVerifier` bütün zənciri yenidən hesablayır və pozulan ilk `id`-ni qaytarır.
+
+**Patient modulu:**
+- `Patient` aggregate (qeydiyyat, merge-patch ilə yeniləmə: "ya hamısı, ya heç nə", soft delete), `PatientAllergy`.
+- Telefon/email/FİN şifrələnir (AES-256-GCM) + blind index. Telefon normallaşdırılır (`+994 50 123-45-67`, `0501234567`, `00994...` eyni heş verir).
+- Əmrlər/sorğular: `RegisterPatient`, `GetPatient`, `SearchPatients`, `UpdatePatient`, `DeletePatient`, `AddAllergy`, `GetMedicalProfile`.
+- Endpoint-lər (`ClinicCore.Api`): `GET/POST /v1/patients`, `GET/PATCH/DELETE /v1/patients/{id}`, `GET /v1/patients/{id}/medical-profile`, `POST /v1/patients/{id}/allergies`.
+- Miqrasiya `T007_patient_permissions.sql`: `patient:read_sensitive` icazəsi.
+
+### Təhlükəsizlik və konfidensiallıq qərarları
+
+| Qərar | Səbəb |
+|---|---|
+| Telefon/email/FİN cavabda **default maskalı** (`+994*******67`). Açıq dəyər `?reveal=true` ilə, ayrıca `patient:read_sensitive` icazəsi ilə və `patient.read.sensitive` kimi audit olunur | Minimum lazımi giriş (HIPAA/GDPR prinsipi) |
+| Scope xaricindəki pasiyent **404** qaytarır (403 yox) | Başqa filialdakı pasiyentin mövcudluğu sızmasın |
+| Dublikat xətasında mövcud pasiyentin id-si yalnız onu görməyə haqqı olana göstərilir | Filiallararası məlumat sızması |
+| Audit-ə PHI yazılmır: axtarış mətni yox, yalnız nəticə sayı; yeniləmədə dəyər yox, yalnız sahə adları | Audit log-un özü PHI anbarına çevrilməsin |
+| İcazəsiz cəhd də auditə yazılır (`permission.denied`) | "Kim nəyə cəhd etdi" izi |
+| Audit yazıla bilmirsə sorğu uğursuz olur (fail-closed) | Audit olunmamış PHI girişi qəbul edilmir |
+| `Cache-Control: no-store` pasiyent cavablarında | PHI brauzer/proxy keşinə düşməsin |
+| Tanınmayan axtarış mətni (`%`, `_`) boş nəticə qaytarır, LIKE joker simvolları literal sayılır | Süzgəcsiz bütün siyahının qaytarılmasının qarşısı |
+| `PATCH` üçün `If-Match` məcburidir (428), köhnə versiya 412 | İtirilmiş yeniləmə (lost update) |
+| Eyni telefon ailə üzvləri üçün normaldır: 409 xəbərdarlıq, `confirmDuplicate=true` ilə keçilir | Real klinika ssenarisi |
+
+### Testlər (166 test, hamısı keçir)
+
+| Layer | Say | Əhatə |
+|---|---|---|
+| Architecture | 7 | Qat və modul sərhədləri |
+| BuildingBlocks unit | 16 | Scope modeli (tenant/branch/own, saxta claim-lər), Authorization və Audit behavior |
+| Identity unit | 44 | (Dilim 1) |
+| Patient unit | 62 | Domen invariantları, telefon normallaşması, maskalama, handler-lər, patch parser, axtarış kriteriyaları |
+| Identity integration | 16 | (Dilim 1), filial claim-i əlavə olunandan sonra yenidən yoxlanıldı |
+| Patient integration | 21 | Real PostgreSQL və real HTTP host: şifrələmə, outbox, audit, filial/own scope, reveal, axtarış (sıra, format, səhifələmə, joker), PATCH konkurrensi (6 paralel yazan), soft delete, allergiya, tenant izolyasiyası, audit zəncirinin pozulması aşkarı |
+
+Patient inteqrasiya testləri 3 dəfə ardıcıl işlədildi, hamısı yaşıl.
+
+### Testlərin tapdığı real bug-lar (düzəldilib)
+
+1. **PATCH cavabı köhnə `rowVersion`/ETag qaytarırdı:** DTO `SaveChanges`-dən əvvəl qurulurdu. İndi əvvəl saxlanır.
+2. **`q=%` bütün pasiyentləri qaytarırdı:** tanınmayan mətn heç bir süzgəc yaratmırdı. İndi boş nəticə.
+3. **Raw SQL alias-ları:** EF-nin snake_case naming convention-ı raw SQL sütun adlarına da tətbiq olunur (`ChartNo` → `chart_no`, `Icd10Code` → `icd10code`). Bu xəta Identity-də də gizlənmişdi (yeni `BranchRow`), inteqrasiya testi tutdu.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **`own` scope yalnız "özünün qeydiyyata aldığı" deməkdir.** Həkimin "öz pasiyentləri" (qəbulu/vizitləri olan) anlayışı Scheduling və Clinical dilimlərində gələcək. Hələlik seed rolunda həkimin `patient:read` icazəsi `own`-dur, yəni qeydiyyatı özü etməyibsə pasiyenti görmür. Dilim 3-4-də "baxan həkim" əlaqəsi əlavə olunacaq.
+- **Axtarış PostgreSQL-dədir** (trigram index + dəqiq heş). Elasticsearch (fuzzy, orfoqrafik səhv) Dilim 7-də. Azərbaycan hərflərinin (Ə, İ/ı) böyük/kiçik hərf fərqsizliyi DB-nin collation-undan asılıdır: istehsal bazası UTF-8 locale (`az_AZ.UTF-8` və ya ICU) ilə yaradılmalıdır. Test bazası default locale ilə işləyir.
+- **`Idempotency-Key` hələ yoxdur** (OpenAPI-də var). Dublikat telefon yoxlaması qismən qoruyur, amma telefonsuz iki eyni sorğu iki pasiyent yaradır.
+- **Anamnez, xəstəlik, dərman yazma endpoint-ləri yoxdur** (yalnız oxuma və allergiya əlavəsi). Sənəd/görüntü yükləmə (S3), razılıq/e-imza, ailə əlaqələri, sığorta, pasiyent birləşdirmə (merge) yoxdur.
+- **`balance` sahəsi** Billing hazır olana qədər qaytarılmır.
+- **Audit partition-ları** yalnız cari və növbəti ay üçün T001 ilə yaranır. Aylıq partition yaradan job (Workers) yazılmayıb, o olmadan ay dəyişəndə audit yazısı uğursuz olar. Bu, Dilim 6-da mütləq bağlanmalıdır.
+- **Audit throughput-u** tenant başına advisory lock ilə ardıcıllaşdırıldığı üçün məhduddur (klinika miqyası üçün kifayət, böyük şəbəkələr üçün ölçülməlidir).
+- **Rate limit və forwarded headers** hələ yalnız Identity-dədir (Gateway dilimində).
+- Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, Testcontainers) qüvvədə qalır.
+
+> Növbəti dilim: **Scheduling** (qəbul yaratma, DB səviyyəsində double-booking qorunması ilə uyğunlaşdırma, boş slotlar, check-in/növbə, no-show, xatırlatma planlaması). Davam etmək üçün **"Davam et"** yazın.

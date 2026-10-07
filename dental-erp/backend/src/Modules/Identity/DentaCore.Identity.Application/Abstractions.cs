@@ -6,7 +6,14 @@ namespace DentaCore.Identity.Application;
 public sealed record PermissionGrant(string Code, string Scope);
 
 /// <summary>İstifadəçinin rolları və effektiv icazələri (eyni icazə bir neçə rolda olarsa ən geniş scope qalır).</summary>
-public sealed record UserAccess(Guid UserId, string FullName, IReadOnlyList<string> Roles, IReadOnlyList<PermissionGrant> Permissions);
+/// <param name="BranchIds">user_roles.branch_id dəyərləri. AllBranches=true olduqda (NULL = bütün filiallar) boşdur.</param>
+public sealed record UserAccess(
+    Guid UserId,
+    string FullName,
+    IReadOnlyList<string> Roles,
+    IReadOnlyList<PermissionGrant> Permissions,
+    IReadOnlyList<Guid> BranchIds,
+    bool AllBranches);
 
 public sealed record IssuedAccessToken(string Token, int ExpiresInSeconds);
 

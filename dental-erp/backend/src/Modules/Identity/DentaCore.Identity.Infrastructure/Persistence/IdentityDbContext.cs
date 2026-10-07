@@ -69,11 +69,4 @@ public sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> option
             b.Property(x => x.CreatedAt).HasColumnName("created_at");
         });
     }
-
-    private sealed class EfTransaction(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction inner) : IUnitOfWorkTransaction
-    {
-        public Task CommitAsync(CancellationToken cancellationToken = default) => inner.CommitAsync(cancellationToken);
-
-        public ValueTask DisposeAsync() => inner.DisposeAsync();
-    }
 }

@@ -185,6 +185,7 @@ FROM invoices WHERE status IN ('issued','partially_paid') GROUP BY patient_id HA
 | `db/migrations/tenant/T004_scheduling.sql` | Qəbul, qrafik, xatırlatma, wait list, növbə |
 | `db/migrations/tenant/T005_clinical.sql` | Vizit, odontoqram, perio, plan, resept, qeyd |
 | `db/migrations/tenant/T006_billing.sql` | Qiymət, invoice, ödəniş, kassa, taksit, gift card, promo |
+| `db/migrations/tenant/T007_patient_permissions.sql` | `patient:read_sensitive` icazəsi (Mərhələ 7, Dilim 2) |
 | `db/provision.sh` | Tenant sxemi yaradır (idempotent platform, ayrı tranzaksiya hər fayl) |
 | `db/tests.sql` | Davranış testləri (double-booking, immutability, versioning) |
 
@@ -192,6 +193,7 @@ Tətbiq (EF Core) tərəfdə bu SQL **mənbə həqiqətidir**: Mərhələ 7-də 
 
 ## 8. Məlum məhdudiyyətlər (dürüst qeyd)
 
+- **Düzəliş (Mərhələ 7):** `audit_log.hash` tətbiq qatında yox, **DB-də** hesablanır (jsonb/inet normallaşması səbəbindən). Bax `docs/07-source-code.md`, Dilim 2.
 - `refresh_tokens`, `change_log` kimi cədvəllər üçün təmizləmə job-ları Mərhələ 7-də yazılacaq.
 - RLS yalnız `platform` sxemində var. Tenant sxemləri `search_path` + ayrı DB rolu ilə izolə olunur. Database-per-tenant (enterprise) üçün eyni skript ayrı DB-yə tətbiq olunur.
 - Odontoqram `tooth_records` cədvəli diş-səth qeydlərini saxlayır; 3D model və CBCT annotasiyaları `patient_documents.meta` + Imaging context-i (Faza 3) ilə genişlənəcək.

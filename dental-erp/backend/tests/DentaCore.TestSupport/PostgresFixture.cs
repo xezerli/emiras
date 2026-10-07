@@ -4,7 +4,7 @@ using DentaCore.Identity.Infrastructure.Security;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
-namespace DentaCore.Identity.IntegrationTests;
+namespace DentaCore.TestSupport;
 
 /// <summary>İnteqrasiya testi yalnız DENTACORE_TEST_PG təyin olunubsa işləyir (Docker/Testcontainers CI-də Mərhələ 9-da).</summary>
 public sealed class IntegrationFactAttribute : FactAttribute
@@ -104,6 +104,13 @@ public sealed class PostgresFixture : IAsyncLifetime
         roleCmd.Parameters.AddWithValue(id);
         roleCmd.Parameters.AddWithValue(role);
         await roleCmd.ExecuteNonQueryAsync();
+        return id;
+    }
+
+    public async Task<Guid> SeedBranchAsync(string schema, string name = "Mərkəz")
+    {
+        var id = Guid.NewGuid();
+        await ExecAsync(schema, "INSERT INTO branches(id, code, name) VALUES ($1, $2, $3)", id, "B" + id.ToString("N")[..8], name);
         return id;
     }
 
