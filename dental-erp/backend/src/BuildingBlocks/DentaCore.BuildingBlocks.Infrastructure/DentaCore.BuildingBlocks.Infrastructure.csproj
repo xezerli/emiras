@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../DentaCore.BuildingBlocks.Application/DentaCore.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+</Project>

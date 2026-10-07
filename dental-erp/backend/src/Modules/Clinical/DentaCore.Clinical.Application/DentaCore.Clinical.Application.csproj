@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../DentaCore.Clinical.Domain/DentaCore.Clinical.Domain.csproj" />
+    <ProjectReference Include="../DentaCore.Clinical.Contracts/DentaCore.Clinical.Contracts.csproj" />
+    <ProjectReference Include="../../../BuildingBlocks/DentaCore.BuildingBlocks.Application/DentaCore.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+</Project>

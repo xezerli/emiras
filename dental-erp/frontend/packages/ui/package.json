@@ -1,0 +1,1 @@
+{ "name": "@dentacore/ui", "version": "0.1.0", "private": true, "main": "src/index.ts", "scripts": { "lint": "echo todo", "test": "echo todo" } }

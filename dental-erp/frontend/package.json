@@ -1,0 +1,12 @@
+{
+  "name": "dentacore-frontend",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "gen:api": "pnpm --filter @dentacore/api-client generate"
+  },
+  "engines": { "node": ">=22" }
+}

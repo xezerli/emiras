@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../../Modules/Billing/DentaCore.Billing.Infrastructure/DentaCore.Billing.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

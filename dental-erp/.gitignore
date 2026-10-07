@@ -1,0 +1,24 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+coverage/
+# Flutter
+.dart_tool/
+build/
+# Secrets (heç vaxt commit olunmur)
+.env
+.env.*
+!.env.example
+*.pfx
+*.pem
+# OS / IDE
+.DS_Store
+.idea/

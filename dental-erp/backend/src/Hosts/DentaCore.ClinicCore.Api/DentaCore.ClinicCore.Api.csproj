@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../../Modules/Patient/DentaCore.Patient.Infrastructure/DentaCore.Patient.Infrastructure.csproj" />
+    <ProjectReference Include="../../Modules/Scheduling/DentaCore.Scheduling.Infrastructure/DentaCore.Scheduling.Infrastructure.csproj" />
+    <ProjectReference Include="../../Modules/Clinical/DentaCore.Clinical.Infrastructure/DentaCore.Clinical.Infrastructure.csproj" />
+    <ProjectReference Include="../../Modules/Sync/DentaCore.Sync.Infrastructure/DentaCore.Sync.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>
