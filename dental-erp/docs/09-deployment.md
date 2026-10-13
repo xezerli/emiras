@@ -55,6 +55,8 @@ Xarici asılılıqlar (PostgreSQL 16, RabbitMQ 3.13, Redis 7, Elasticsearch 8.11
 3. RabbitMQ `guest` istifadəçisi konteynerə port xəritəsi ilə qoşulanda rədd olunur (24 test düşdü; `loopback_users` ERL arqumenti kömək etmədi): `RABBITMQ_DEFAULT_USER/PASS` ilə adi istifadəçi.
 4. `DentaCore.TestSupport` `xunit` istinadı səbəbindən test layihəsi sayılırdı və boş testhost `dotnet test`-i exit 1 ilə bitirirdi (lokalda mən nəticəni `grep` ilə süzdüyümdən görünməmişdi): `IsTestProject=false`.
 
+Sonradan: CI-nin NuGet zəiflik addımı yeni dərc olunmuş `GHSA-334f-vvp4-7g6p` (High, `Microsoft.AspNetCore.SignalR.Common 9.0.20`, tranzitiv, **yalnız test layihəsi**) tutdu; `SignalR.Client` 9.0.21-ə qaldırılaraq düzəldildi. Bu, təhlükəsizlik addımının dəyərini göstərir: eyni kod bir saat əvvəl təmiz idi, advisory bazası dəyişdi.
+
 Həmçinin: ardıcıl push-lar `cancel-in-progress` ilə köhnə run-ları ləğv edir; yaşıl nəticə yalnız ən son commit üçün sayılır.
 
 ### Bu mərhələdə əlavə olunan avtomatik testlər
