@@ -16,14 +16,14 @@
 | Səviyyə | Alət | Say | Nə sübut edir |
 |---|---|---|---|
 | Arxitektura | xUnit (csproj istinad qrafı) | 7 | Modullar yalnız `.Contracts` ilə danışır; host-lar yalnız modul `.Infrastructure`-a istinad edir; Domain heç nədən asılı deyil |
-| Backend unit | xUnit | 449 | Domen qaydaları, handler-lər, validatorlar, marşrutlaşdırma, tarix/pul hesabı |
-| Backend inteqrasiya | xUnit + WebApplicationFactory + **real** PG/AMQP/Redis(/ES) | 197 | HTTP → handler → DB → outbox → broker → consumer → SignalR/indeks zənciri, RBAC, tenant izolyasiyası, idempotentlik, paralel yarışlar |
+| Backend unit | xUnit | 389 | Domen qaydaları, handler-lər, validatorlar, marşrutlaşdırma, tarix/pul hesabı |
+| Backend inteqrasiya | xUnit + WebApplicationFactory + **real** PG/AMQP/Redis(/ES) | 257 | HTTP → handler → DB → outbox → broker → consumer → SignalR/indeks zənciri, RBAC, tenant izolyasiyası, idempotentlik, paralel yarışlar |
 | Frontend unit/komponent | Vitest + Testing Library + axe | 88 (api-client 13, ui 12, web 63) | Klient (refresh, ApiError), komponentlər (a11y), BFF (cookie, Origin), ekran məntiqi (təkrar ödəniş açarı, dublikat axını, maska) |
 | **E2E** | Playwright (Chromium) + **real backend** (6 servis) | 13 | Brauzerdən verilənlər bazasına tam yol, cookie atributları, rola görə naviqasiya, ödəniş axını, **axe WCAG 2.2 AA (real kontrast, açıq+tünd)** |
 | Yük/davamlılıq | `tests/load/load.mjs` | 7 ssenari | Gecikmə persentilləri, xəta nisbəti, yük altında outbox boşalması |
 | Asılılıq təhlükəsizliyi | `pnpm audit`, `dotnet list package --vulnerable` | - | Məlum zəiflik yoxdur (bu sessiyada: 0) |
 
-Cəmi: backend **653** test (625 keçir, 28 Elasticsearch tələb edir və ES olmadan atlanır), frontend **88** unit + **13** e2e.
+Cəmi: backend **653** test (7 + 389 + 257) (625 keçir, 28 Elasticsearch tələb edir və ES olmadan atlanır), frontend **88** unit + **13** e2e.
 
 Backend inteqrasiya testlərinin bölgüsü: ClinicCore 62, Gateway 40, Billing 38, Sync 32, Search 26 (ES), Identity 17, Workers 17 (2 ES), Notify 14, Dashboard 11.
 
@@ -90,13 +90,11 @@ Bu mərhələdə `web` əhatəsi **33.7% → 72.3%** qaldırıldı (ekran kompon
 
 ## 6. Mutasiya yoxlamaları (testin dişi var)
 
-Aşağıdakı hallarda kod qəsdən pozulub, uyğun test düşüb, sonra bərpa edilib:
+Əvvəlki dilimlərdə kritik testlər (Billing kilidləri, mesajlaşma başlanğıcı, sync horizontu) əl ilə pozulub-bərpa edilərək yoxlanıb; təfərrüat həmin dilimlərin qeydlərindədir (`07-source-code.md`) və **bu mərhələdə təkrar işlədilməyib**.
 
-- Billing: faktura/smen sətir kilidləri (`FOR UPDATE`/`FOR SHARE`) → paralel ödəniş testləri düşdü.
-- Mesajlaşma: topologiyanın `StartAsync` əvəzinə `ExecuteAsync`-də elanı → başlanğıc yarışı testi düşdü (real səhv idi, regress testi əlavə olundu).
-- Sync/indeksləmə: horizont əvəzinə `seq` kursoru → "commit sırası ≠ seq" testi düşdü.
-- Axtarış validatoru: operator önceliyi səhvi → real inteqrasiya testi tutdu.
-- **Bu mərhələ:** `RequireAuthorization()` silinməsi → default-deny testi düşdü (§4).
+Bu mərhələdə işlədilən və təsdiqlənən: Billing host-undan `RequireAuthorization()` silindi → default-deny testi `GET /v1/invoices`, `/services`, `/cash-shifts/current` və s. açıq marşrutlarını göstərərək düşdü; bərpadan sonra keçdi (§4).
+
+Avtomatik mutasiya aləti (Stryker) hələ yoxdur (§9).
 
 ## 7. Yük və davamlılıq
 
@@ -116,7 +114,7 @@ Aşağıdakı hallarda kod qəsdən pozulub, uyğun test düşüb, sonra bərpa 
 
 Qeydlər:
 - Rəqəmlər **mütləq istehsal ölçüsü deyil** (tək maşın, paylaşılan CPU). Məqsəd reqressiya: hədd (`--p95`, `--max-errors`) aşılarsa skript çıxış kodu 1 verir.
-- `GET invoices` p99 = 2.3 s: tək xarici dəyər (soyuq bağlantı/JIT şübhəsi). 8 s-lik pəncərədə 1295 sorğudan yalnız bir neçəsi təsirlənib, amma **araşdırılmayıb**: Mərhələ 9-da davamlı yük (dəqiqələrlə) və `pg_stat_statements` ilə yenidən ölçülməlidir.
+- `GET invoices` p99 = 2.3 s: sorğuların ≥1%-i (≈13 sorğu) 2.3 s-dən yavaş idi, p95 isə 99 ms. Səbəb **araşdırılmayıb** (soyuq bağlantı/JIT, pool gözləməsi, GC və ya kilid ehtimalları). Mərhələ 9-da davamlı yük (dəqiqələrlə) və `pg_stat_statements` ilə yenidən ölçülməlidir; bu hələ açıq sualdır.
 - Yük testi yazma ssenarisində e2e bazasına minlərlə pasiyent əlavə edir; ayrıca baza istifadə edin.
 
 ## 8. Tapılmış səhvlər (bu mərhələ və 8b)
