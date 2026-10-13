@@ -32,6 +32,11 @@ public sealed class MessagingFixture : IAsyncLifetime
 
     public string AmqpUri { get; private set; } = string.Empty;
 
+    /// <summary>Real Elasticsearch (DENTACORE_TEST_ES). Yoxdursa Workers-in indexer-i əlçatmaz ünvana yönəldilir (testləri ləngitmir, yalnız log yazır).</summary>
+    public string EsUri { get; private set; } = string.Empty;
+
+    public string EsOrDead => string.IsNullOrEmpty(EsUri) ? "http://127.0.0.1:1" : EsUri;
+
     public string Exchange => $"{Run}.events";
 
     public string DeadExchange => $"{Run}.dead";
@@ -43,6 +48,7 @@ public sealed class MessagingFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         AmqpUri = Environment.GetEnvironmentVariable(EnvVar) ?? string.Empty;
+        EsUri = Environment.GetEnvironmentVariable("DENTACORE_TEST_ES") ?? string.Empty;
         await Db.InitializeAsync();
     }
 
@@ -57,7 +63,7 @@ public sealed class MessagingFixture : IAsyncLifetime
         var factory = new ConnectionFactory { Uri = new Uri(AmqpUri) };
         await using var connection = await factory.CreateConnectionAsync();
         await using var channel = await connection.CreateChannelAsync();
-        foreach (var queue in new[] { "patient.no-show", "billing.invoice-draft", "probe" })
+        foreach (var queue in new[] { "patient.no-show", "billing.invoice-draft", "search.audit", "probe" })
         {
             foreach (var name in new[] { $"{QueuePrefix}.{queue}", $"{QueuePrefix}.{queue}.dlq" })
             {
@@ -67,6 +73,25 @@ public sealed class MessagingFixture : IAsyncLifetime
 
         await channel.ExchangeDeleteAsync(Exchange);
         await channel.ExchangeDeleteAsync(DeadExchange);
+        await DeleteSearchIndexesAsync();
+    }
+
+    private async Task DeleteSearchIndexesAsync()
+    {
+        if (string.IsNullOrEmpty(EsUri))
+        {
+            return;
+        }
+
+        using var http = new HttpClient { BaseAddress = new Uri(EsUri.TrimEnd('/') + "/") };
+        using var response = await http.GetAsync($"_cat/indices/{Run}-*?format=json");
+        if (response.IsSuccessStatusCode)
+        {
+            foreach (var index in System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.EnumerateArray())
+            {
+                await http.DeleteAsync(index.GetProperty("index").GetString());
+            }
+        }
     }
 
     public Dictionary<string, string?> Settings(params (string Key, string Value)[] extra)
@@ -81,6 +106,8 @@ public sealed class MessagingFixture : IAsyncLifetime
             ["RabbitMq:Exchange"] = Exchange,
             ["RabbitMq:DeadLetterExchange"] = DeadExchange,
             ["RabbitMq:QueuePrefix"] = QueuePrefix,
+            ["Elasticsearch:Uri"] = EsOrDead,
+            ["Elasticsearch:IndexPrefix"] = Run,
         };
         foreach (var (key, value) in extra)
         {
@@ -116,6 +143,20 @@ public sealed class MessagingFixture : IAsyncLifetime
         }
 
         return await condition();
+    }
+}
+
+/// <summary>PostgreSQL + RabbitMQ + REAL Elasticsearch.</summary>
+public sealed class PipelineFactAttribute : FactAttribute
+{
+    public PipelineFactAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(PostgresFixture.EnvVar))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(MessagingFixture.EnvVar))
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DENTACORE_TEST_ES")))
+        {
+            Skip = "Set DENTACORE_TEST_PG, DENTACORE_TEST_AMQP and DENTACORE_TEST_ES to run the search pipeline tests.";
+        }
     }
 }
 

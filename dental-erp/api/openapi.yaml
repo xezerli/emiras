@@ -655,16 +655,41 @@ paths:
     get:
       operationId: getAdminAudit
       tags: [Admin]
-      summary: Audit log axtarışı (Elasticsearch)
+      summary: Audit log axtarışı (Elasticsearch, tenant üzrə ayrı indeks). Yalnız tenant scope-lu audit:read. Oxumaq özü audit olunur
       x-permission: audit:read
       parameters:
-        - { name: entity, in: query, schema: { type: string } }
+        - { name: entity, in: query, schema: { type: string, maxLength: 64 } }
         - { name: entityId, in: query, schema: { type: string, format: uuid } }
         - { name: userId, in: query, schema: { type: string, format: uuid } }
+        - { name: action, in: query, schema: { type: string, maxLength: 64 } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { $ref: '#/components/parameters/Cursor' }
-      responses: { '200': { description: OK } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 100 } }
+      responses:
+        '200': { description: 'Yeni qeydlər əvvəl. Detallar (details) cavaba daxil edilmir', content: { application/json: { schema: { $ref: '#/components/schemas/AuditPage' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { description: 'Axtarış mühərriki əlçatmazdır', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /search/patients:
+    get:
+      operationId: getSearchPatients
+      tags: [Patient]
+      summary: Pasiyent axtarışı (Elasticsearch). Yazdıqca (prefiks), hərf səhvinə dözümlü, Azərbaycan hərfləri (ə ı ö ü ş ç ğ) latın əsasına qatlanır, kart nömrəsi dəqiq
+      description: >
+        Filial/tenant scope-u sorğuya yazılır. own scope dəstəklənmir (403): onlar adi GET /patients?q= istifadə edir.
+        Mühərrik əlçatmazdırsa 503: klient adi axtarışa keçməlidir. Ad PHI-dir: cavab keşlənmir, auditə mətn yox yalnız nəticə sayı yazılır.
+      x-permission: patient:read
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 100 }, description: 'Ad, soyad, ata adı (istənilən sıra) və ya kart nömrəsi. Tək simvol yalnız rəqəm ola bilər' }
+        - { name: branchId, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, default: 10, minimum: 1, maximum: 50 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/PatientHit' } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { description: 'Axtarış mühərriki əlçatmazdır', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
 
   /patients/{patientId}/visits:
     parameters: [ { $ref: '#/components/parameters/PatientId' } ]
@@ -1134,6 +1159,30 @@ components:
         topProviders: { type: array, items: { type: object, properties: { providerId: { type: string, format: uuid }, name: { type: string }, revenue: { type: number } } } }
         rooms: { type: array, items: { type: object, properties: { roomId: { type: string, format: uuid }, name: { type: string }, state: { type: string, enum: [free, occupied, cleaning] } } } }
         revenueSeries: { type: array, items: { type: object, properties: { day: { type: string, format: date }, amount: { type: number } } } }
+    PatientHit:
+      type: object
+      properties:
+        patientId: { type: string, format: uuid }
+        chartNo: { type: integer, format: int64 }
+        firstName: { type: string }
+        lastName: { type: string }
+        fatherName: { type: [string, 'null'] }
+        branchId: { type: string, format: uuid }
+        score: { type: number }
+    AuditHit:
+      type: object
+      properties:
+        auditId: { type: integer, format: int64 }
+        occurredAt: { type: string, format: date-time }
+        action: { type: string }
+        entity: { type: [string, 'null'] }
+        entityId: { type: [string, 'null'], format: uuid }
+        userId: { type: [string, 'null'], format: uuid }
+    AuditPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AuditHit' } }
+        nextCursor: { type: [string, 'null'] }
     SyncChange:
       type: object
       required: [entity, entityId, op]

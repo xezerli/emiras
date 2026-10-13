@@ -108,7 +108,8 @@ public sealed class PullTests(SyncFixture f)
         var (page, changes) = await PullAsync(client, cursor);
 
         Assert.Empty(changes);
-        Assert.Equal(cursor, page.GetProperty("cursor").GetInt64());
+        // Horizont başqa (əlaqəsiz) tranzaksiyalarla da irəliləyir, ona görə bərabərlik yox, geri çəkilməmə yoxlanılır
+        Assert.True(page.GetProperty("cursor").GetInt64() >= cursor);
         Assert.False(page.GetProperty("hasMore").GetBoolean());
     }
 
@@ -200,7 +201,7 @@ public sealed class PullTests(SyncFixture f)
 
         await f.Db.ExecAsync(SyncFixture.Demo, "INSERT INTO patients(id, branch_id, first_name, last_name) VALUES ($1, $2, 'T', 'Fast')", fast, branch);   // sonrakı seq, ARTIQ commit olub
 
-        var (firstPage, firstChanges) = await PullAsync(client, start);
+        var (firstPage, firstChanges) = await PullAsync(client, start, waitForHorizon: false);   // yavaş tranzaksiya AÇIQDIR: gözləmək mənasızdır
         // Yavaş tranzaksiya açıq olduğundan ondan sonrakı heç nə verilmir: yoxsa kursor onu ötüb əbədi itirərdi
         Assert.DoesNotContain(Of(firstChanges, "patients"), c => IdOf(c) == fast);
         Assert.DoesNotContain(Of(firstChanges, "patients"), c => IdOf(c) == slow);

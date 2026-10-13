@@ -22,8 +22,12 @@ public sealed class SyncFixture : IAsyncLifetime, IDisposable
 
     public ApiFactory<Program>? Factory { get; private set; }
 
+    /// <summary>Statik yardımçılar (NowAsync/PullAsync) üçün: bütün testlər tək fixture-dadır.</summary>
+    public static SyncFixture? Current { get; private set; }
+
     public async Task InitializeAsync()
     {
+        Current = this;
         await Db.InitializeAsync();
         if (!string.IsNullOrEmpty(Db.ConnectionString))
         {
@@ -67,9 +71,31 @@ public sealed class SyncFixture : IAsyncLifetime, IDisposable
             Demo, "INSERT INTO appointments(branch_id, patient_id, provider_id, period, status) VALUES ($1, $2, $3, tstzrange(now() + interval '1 day', now() + interval '1 day 30 minutes'), $4)",
             branch, patient, provider, status);
 
+    /// <summary>
+    /// Pull-un horizontu (xmin) KLASTER üzrədir: başqa verilənlər bazasındakı açıq yazı tranzaksiyası da onu geridə saxlayır (bu, düzgün davranışdır:
+    /// yalnız gecikmə yaradır). Testlər paralel test layihələri ilə eyni klasterdə işləyə bildiyi üçün hər pull-dan əvvəl horizont bu bazanın
+    /// bütün commit olunmuş jurnal sətirlərini keçənə qədər gözlənilir.
+    /// </summary>
+    public async Task WaitForHorizonAsync(string schema = Demo)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var caughtUp = await Db.ScalarAsync<bool>(
+                schema, "SELECT pg_snapshot_xmin(pg_current_snapshot())::text::bigint > COALESCE((SELECT max(xid)::text::bigint FROM change_log), 0)");
+            if (caughtUp)
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+    }
+
     /// <summary>Cari son kursor: bütün gözləyən dəyişiklikləri oxuyub sona çatır. Testlər dəyişiklikdən ƏVVƏL bunu çağırıb öz pəncərəsini ayırır.</summary>
     public static async Task<long> NowAsync(HttpClient client)
     {
+        await Current!.WaitForHorizonAsync();
         long cursor = 0;
         for (var i = 0; i < 200; i++)
         {
@@ -84,8 +110,13 @@ public sealed class SyncFixture : IAsyncLifetime, IDisposable
         throw new InvalidOperationException("Pull did not converge.");
     }
 
-    public static async Task<(JsonElement Page, List<JsonElement> Changes)> PullAsync(HttpClient client, long cursor, int limit = 2000)
+    public static async Task<(JsonElement Page, List<JsonElement> Changes)> PullAsync(HttpClient client, long cursor, int limit = 2000, bool waitForHorizon = true)
     {
+        if (waitForHorizon)
+        {
+            await Current!.WaitForHorizonAsync();
+        }
+
         var response = await client.GetAsync($"/v1/sync/pull?cursor={cursor}&limit={limit}");
         Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
         var page = await JsonAsync(response);

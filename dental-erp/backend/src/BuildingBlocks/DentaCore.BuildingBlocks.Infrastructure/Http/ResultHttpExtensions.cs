@@ -19,6 +19,7 @@ public static class ResultHttpExtensions
             ErrorType.PreconditionFailed => StatusCodes.Status412PreconditionFailed,
             ErrorType.Locked => StatusCodes.Status423Locked,
             ErrorType.Gone => StatusCodes.Status410Gone,
+            ErrorType.Unavailable => StatusCodes.Status503ServiceUnavailable,
             _ => StatusCodes.Status500InternalServerError,
         };
 

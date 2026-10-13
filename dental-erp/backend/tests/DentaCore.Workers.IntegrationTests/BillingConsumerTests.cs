@@ -16,6 +16,9 @@ public sealed class BillingConsumerTests(MessagingFixture fx)
         ("RabbitMq__Exchange", fx.Exchange),
         ("RabbitMq__DeadLetterExchange", fx.DeadExchange),
         ("RabbitMq__QueuePrefix", fx.QueuePrefix),
+        ("Elasticsearch__Uri", fx.EsOrDead),
+        ("Elasticsearch__IndexPrefix", fx.Run),
+        ("Elasticsearch__IndexerIntervalSeconds", "1"),
         ("RabbitMq__OutboxPollInterval", "00:00:00.100"),
         ("RabbitMq__ConsumerRetryDelays__0", "00:00:00.050"),
         ("RabbitMq__ConsumerRetryDelays__1", "00:00:00.050"));

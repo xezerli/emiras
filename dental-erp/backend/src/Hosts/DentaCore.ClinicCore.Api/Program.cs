@@ -13,6 +13,8 @@ using DentaCore.Patient.Application;
 using DentaCore.Patient.Infrastructure;
 using DentaCore.Scheduling.Application;
 using DentaCore.Scheduling.Infrastructure;
+using DentaCore.Search.Application;
+using DentaCore.Search.Infrastructure;
 using DentaCore.Sync.Application;
 using DentaCore.Sync.Infrastructure;
 
@@ -23,6 +25,7 @@ builder.Services.AddSchedulingModule(builder.Configuration);
 builder.Services.AddClinicalModule(builder.Configuration);
 builder.Services.AddDashboardModule(builder.Configuration);
 builder.Services.AddSyncModule(builder.Configuration);
+builder.Services.AddSearchModule(builder.Configuration);
 builder.Services.AddAuditModule(builder.Configuration);
 builder.Services.AddJwtValidation(builder.Configuration);
 
@@ -277,6 +280,18 @@ app.MapGet("/v1/dashboard/summary", async (Guid? branchId, DateOnly? date, HttpC
 {
     http.Response.Headers.CacheControl = "no-store";   // maliyyə göstəriciləri brauzer/proxy keşinə düşməsin
     return (await sender.Send(new GetDashboardSummaryQuery(branchId, date), ct)).ToHttpResult(Results.Ok);
+}).RequireAuthorization();
+
+// Elasticsearch: yazdıqca/səhvə dözümlü pasiyent axtarışı və audit axtarışı. Mühərrik əlçatmazdırsa 503 (klient adi axtarışa keçir).
+app.MapGet("/v1/search/patients", async (string q, Guid? branchId, int? limit, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";   // ad və soyad PHI-dir
+    return (await sender.Send(new FindPatientsQuery(q ?? string.Empty, branchId, limit ?? 10), ct)).ToHttpResult(Results.Ok);
+}).RequireAuthorization();
+app.MapGet("/v1/admin/audit", async (string? entity, Guid? entityId, Guid? userId, string? action, DateTimeOffset? from, DateTimeOffset? to, string? cursor, int? limit, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    return (await sender.Send(new SearchAuditQuery(entity, entityId, userId, action, from, to, cursor, limit ?? 50), ct)).ToHttpResult(Results.Ok);
 }).RequireAuthorization();
 
 // Offline klientlər: pull (kursorla), snapshot (tam yükləmə), push (idempotent). Cavablar həssas klinik məlumat daşıyır: keşlənmir.

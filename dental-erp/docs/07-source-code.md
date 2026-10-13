@@ -13,7 +13,7 @@
 | 6 | Notify (SignalR canlı bildirişlər) + Gateway (YARP) | ✅ Tamamlandı |
 | 7a | Audit publisher (outbox) + Dashboard (Redis keşi) | ✅ Tamamlandı |
 | 7b | Sync (offline pull/snapshot/push, konflikt həlli) | ✅ Tamamlandı |
-| 7c | Elasticsearch indexer + axtarış | |
+| 7c | Elasticsearch indexer + axtarış (REAL Elasticsearch 8.11 ilə sınaqdan keçib) | ✅ Tamamlandı |
 | 8 | Frontend (Next.js): Design System, auth, əsas ekranlar | |
 
 ---
@@ -613,6 +613,87 @@ Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real Ra
 - **`deviceId` yoxlanmır** (`user_devices` ilə bağlı deyil), yalnız audit və idempotentlik üçün istifadə olunur.
 - **Cihazdakı məlumat PHI-dir** (klinik qeydlər daxil): mobil/desktop klient lokal bazanı şifrələməlidir (Flutter/MAUI mərhələsində).
 - **Push sinxrondur və ardıcıldır** (dəstdə ≤200 dəyişiklik). Çox böyük offline növbə üçün klient dəstləri bölür.
+- **Horizont klaster üzrədir**: `pg_snapshot_xmin` PostgreSQL klasterindəki BÜTÜN verilənlər bazalarının açıq yazı tranzaksiyalarını nəzərə alır. İstənilən uzunmüddətli yazı tranzaksiyası (hesabat, miqrasiya, ilişmiş bağlantı) bütün tenant-ların sinxronunu və axtarış indeksləməsini onun bitməsinə qədər gecikdirir (itki yoxdur). Monitorinq: `now() - xact_start` ən böyük açıq yazı tranzaksiyası üçün xəbərdarlıq (Mərhələ 9).
 - **`change_log` yalnız trigger qoşulan cədvəllərdə dolur**; yeni sinxron cədvəl əlavə edəndə `attach_standard_triggers` unudulmamalıdır.
 
-> Növbəti dilim: **7c Elasticsearch indexer və axtarış** (`audit.recorded` və pasiyent/qeyd axtarışı). Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 7c: Elasticsearch indexer və axtarış
+
+**Sınaq real Elasticsearch 8.11.4 ilə aparılıb** (stub yox): mühitdə rəsmi `elasticsearch:8.11.4` image-i (Docker Hub-ın Google güzgüsü `mirror.gcr.io` vasitəsilə) yüklənib, layer-lər çıxarılıb və tək node kimi işə salınıb (`discovery.type: single-node`, security söndürülü, yalnız lokal). Bütün inteqrasiya testləri onunla işləyir; `DENTACORE_TEST_ES` təyin olunmayıbsa atlanır.
+
+### Nə yazıldı
+
+| Hissə | Məzmun |
+|---|---|
+| `Search.Application` | `FindPatientsQuery`, `SearchAuditQuery` (+ validator, scope qaydası, audit), `IPatientSearch`, `IAuditSearch`, `SearchUnavailableException` |
+| `Search.Infrastructure` | `ElasticClient` (REST sarğısı), `ElasticIndexes` (adlar və mapping), `ElasticPatientSearch`, `ElasticAuditSearch`, `AuditIndexConsumer`, `PatientIndexer` + `PatientIndexerService` |
+| `T012_search_indexing.sql` | `indexer_cursors` |
+| ClinicCore | `GET /v1/search/patients`, `GET /v1/admin/audit` (Gateway marşrutları əlavə olundu; `/v1/admin/users` yönləndirilmir) |
+| Workers | audit consumer-i (`search.audit` ← `audit.recorded`) və pasiyent indexer-i |
+| `ErrorType.Unavailable` | → **503** |
+
+### İndeksləmə modeli
+
+- **Audit**: `audit.recorded` (7a) → RabbitMQ → `AuditIndexConsumer`. Sənəd id-si `auditId`-dir və **`_create`** ilə yazılır: təkrar çatdırılma sənədi dəyişmir, ikinci sənəd yaratmır, **eyni `auditId` ilə fərqli məzmun gəlsə mövcud qeyd əzilmir** (test). Audit-in həqiqət mənbəyi PostgreSQL hash zənciridir; ES yalnız axtarış surətidir.
+- **Pasiyent**: hadisələrə güvənmir, `change_log`-dan (T011-in commit-təhlükəsiz `xid` kursoru) qidalanır: redaktə, soft-delete və birbaşa SQL də düşür. Kursor tenant sxemində (`indexer_cursors`) saxlanır və **yalnız Elasticsearch qəbul etdikdən sonra** irəli gedir (ES yıxılsa kursor yerində qalır, itki yoxdur, test). Kursor yoxdursa əvvəlcə **tam doldurma** (backfill).
+- **External versiya**: hər yazı sətirin `row_version`-u ilə `external_gte`: təkrar, gecikmiş və ya sıradan çıxmış yazı daha yeni sənədi əzə bilməz (test: ES-də 999 versiyalı sənədə DB-nin 2-ci versiyası yazıla bilmir).
+- **Bulk nəticəsi sətir-sətir yoxlanılır**: HTTP 200 qaytarsa da ayrı sətirlər uğursuz ola bilər; 409 (daha yeni var) və silmədə 404 gözlənilir, qalanı istisna atır ki, kursor irəli getməsin.
+
+### Axtarış
+
+- **Analiz**: `az_map` simvol xəritəsi (ə→e, ı→i, İ→i, ö→o, ü→u, ş→s, ç→c, ğ→g, böyük hərflər də) + lowercase + asciifolding. İndeksdə `edge_ngram` (yazdıqca axtarış), sorğuda yalnız qatlama. Üç yol birləşir: prefiks (bütün sözlər üst-üstə), **hərf səhvinə dözümlü** (`fuzziness AUTO`) və **kart nömrəsi** dəqiq uyğunluq (boost). Ad, soyad, ata adı istənilən sırada.
+- **Tək simvol** yalnız rəqəm ola bilər (kart nömrəsi `7`); ad üçün ≥2 simvol. Axtarış mətni **sorğu sintaksisi deyil, məlumatdır** (`*:*`, `" OR 1=1`, JSON sətri heç nə qaytarmır, test).
+- **Scope sorğuya yazılır**: `tenant` hamısı/seçilmiş filial, `branch` yalnız öz filialları (`terms` filtri; icazəsiz sətirlər nəticəyə düşmür), yad filial 404. `own` scope dəstəklənmir (403): baxan həkim əlaqəsi indeksdə yoxdur, adi axtarışdan istifadə olunur.
+- **Audit axtarışı**: yalnız **tenant scope-lu** `audit:read`; filtrlər `entity, entityId, userId, action, from, to`; yeni qeydlər əvvəl; `search_after` kursoru; cavab yalnız `auditId, occurredAt, action, entity, entityId, userId` (details **heç vaxt** qaytarılmır). Axtarışın özü audit olunur (`audit.search`, yalnız say).
+- **Mühərrik əlçatmazdırsa 503** (`search.unavailable`), 500 yox; klient adi axtarışa keçir. İndeksi olmayan tenant boş nəticə alır (404 yox).
+
+### Tenant izolyasiyası və PHI
+
+- **Hər tenant-ın ayrı indeksi**: `dc-patients-<tenantId>`, aylıq `dc-audit-<tenantId>-yyyy.MM`. Sorğu indeks adını tenant id-dən server tərəfdə qurur (istifadəçi daxil etdiyi adla yox), əlavə olaraq hər sənəddə və sorğuda `tenantId` filtri var.
+- **Pasiyent indeksinə yalnız ad sahələri düşür** (`firstName, lastName, fatherName, fullName, chartNo, status, branchId`): telefon, e-poçt, FIN, ünvan və qeydlər heç vaxt. Mapping `dynamic: strict`: gözlənilməz sahə yazılsa Elasticsearch rədd edir (test).
+- Ad PHI-dir: cavab `no-store`, auditə axtarış mətni deyil yalnız nəticə sayı yazılır. **İstehsalda Elasticsearch-ün özü şifrələnməli və autentifikasiyalı olmalıdır** (`ApiKey`/TLS); lokal test klasteri yalnız loopback-dədir.
+
+### Testlər (646 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Search.UnitTests` | 18 | Scope həlli, yad filial heç vaxt mühərrikə çatmır, outage → 503 xətası, validator, audit təsviri mətn daşımır |
+| `Search.IntegrationTests` | 26 | **Real ES**: hərf qatlaması (qısa prefikslər fuzzy ilə xilas olmur), sözlərin sırası, hərf səhvi, relevans sırası, kart nömrəsi, sorğu sintaksisi inyeksiyası, limit; filial scope-u, tenant izolyasiyası (ayrı indekslər), indeksdə yalnız ad sahələri, audit-də mətn yoxdur; indeksləmə (redaktə/silmə/yeni), backfill, external versiya, ES yıxılanda kursor yerində, 503, boş indeks, strict mapping; audit: real API əməliyyatları → filtrlər, səhifələmə (təkrarsız), idempotent və əzilməz, aylıq indekslər, tenant/scope, yanlış girişlər |
+| `Workers.IntegrationTests` (+2) | 17 | **PostgreSQL → RabbitMQ → Workers → Elasticsearch** bütün zənciri: audit outbox sətri aylıq indeksə düşür; pasiyent əlavə/redaktə/silmə indeksə gəlir |
+| `Gateway.IntegrationTests` (+3) | 40 | `/v1/search/*`, `/v1/admin/audit`; `/v1/admin/users` yönləndirilmir |
+
+**Mutasiya yoxlamaları** (kod bərpa olundu; hamısı real ES ilə): filial filtri çıxarılanda, audit `_create` əvəzinə yenidən yazılanda, `external_gte` çıxarılanda, sorğu analizatorundan AZ xəritəsi çıxarılanda uyğun test qırılır. (İlk "AZ qatlaması" mutasiyası sağ qaldı: fuzzy axtarış testləri gizlədirdi; qısa prefiks assertion-ları əlavə olundu və mutasiya indi tutulur.)
+
+### Testlərin tapdığı nöqtələr
+
+- **Validator xətası**: `x is A or B && C` ifadəsində `&&` bütün `is` nəticəsinə tətbiq olunurdu, ona görə hər sorğu rədd olunurdu (real inteqrasiya testi tutdu). Aydın metodla əvəz olundu. Kart nömrəsi üçün tək rəqəm icazəsi də bu testdən çıxdı.
+- **Horizont klaster üzrədir**: `pg_snapshot_xmin` başqa verilənlər bazalarındakı açıq yazı tranzaksiyalarını da nəzərə alır. Paralel test layihələri eyni PostgreSQL klasterində işləyəndə pull/indexer bir müddət geridə qala bilirdi (test təsadüfi qırılırdı). Davranış düzgündür (yalnız gecikmə, itki yox), testlər indi horizontun öz yazılarını keçməsini gözləyir və `cursor`-un bərabərliyi yox, geri çəkilməməsi yoxlanılır. Sync sənədinə bu fakt əlavə olundu: **istehsalda uzunmüddətli yazı tranzaksiyası bütün sinxronu və indeksləməni gecikdirər** (monitorinq qaydası Mərhələ 9-da).
+
+### Testləri necə işə salmaq (mühit dəyişənləri)
+
+| Dəyişən | Nə üçün | Nümunə |
+|---|---|---|
+| `DENTACORE_TEST_PG` | Bütün inteqrasiya testləri (PostgreSQL superuser bağlantısı) | `Host=/tmp;Port=54329;Username=postgres;Database=postgres` |
+| `DENTACORE_TEST_AMQP` | Workers və Notify | `amqp://guest:guest@localhost:5672/` |
+| `DENTACORE_TEST_REDIS` | Dashboard keşi (Redis testi) | `127.0.0.1:6390` |
+| `DENTACORE_TEST_ES` | Search və Workers boru xətti | `http://127.0.0.1:9200` |
+
+Dəyişən yoxdursa ona bağlı testlər **atlanır** (uğursuz sayılmır). Mərhələ 9-da CI hamısını servis konteynerləri ilə təyin edəcək.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Yalnız pasiyent adı və audit indeksləndi.** Klinik qeyd və sənəd axtarışı yoxdur: məzmun PHI-dir və ayrıca qərar tələb edir (şifrələmə, sahə səviyyəli icazə, saxlama müddəti).
+- **`own` scope axtarışda dəstəklənmir** (403). Baxan həkim əlaqəsini indeksə köçürmək randevu hadisələrini də indeksləməyi tələb edir.
+- **Telefon və FIN ilə axtarış yoxdur**: onlar şifrəlidir və yalnız PostgreSQL-dəki blind index ilə dəqiq axtarılır (adi pasiyent axtarışı).
+- **Audit axtarışı iki mənbədən yalnız birini göstərir**: Elasticsearch-də olanı. Consumer geridədirsə yeni qeydlər bir qədər gec görünür; bütövlük yoxlaması hələ `IAuditChainVerifier` ilə PostgreSQL üzərindədir.
+- **İndeksin yenidən qurulması** (mapping dəyişəndə) avtomatik deyil: yeni indeks adı/alias və `indexer_cursors`-dan `patients-es` sətrini silmək lazımdır (backfill təkrarlanır). Alias ilə sıfır dayanma qaçışı Mərhələ 9-da.
+- **GDPR silmə**: tenant silinəndə indekslər əl ilə silinməlidir (`dc-*-<tenantId>*`); pasiyent silinməsi (soft-delete) indeksdən çıxarılır, amma audit indeksində `entityId` qalır (audit dəyişməzdir).
+- **Replika və shard sayı** konfiqurasiya ilədir (`Elasticsearch:Shards/Replicas`, default 1/0). İstehsal klasteri üçün ölçü seçimi Mərhələ 9-dadır.
+- **Elasticsearch 8.11 ilə sınaqdan keçib**; 9.x ilə uyğunluq yoxlanılmayıb.
+
+### Mərhələ 7-nin yekunu
+
+Slice 1–7 tamdır: BuildingBlocks və Identity, Patient, Scheduling, Clinical, mesajlaşma, Billing, Notify və Gateway, Audit publisher və Dashboard, Sync, Elasticsearch. **Qalan (spesifikasiyada Mərhələ 7-yə aid):** Frontend (Next.js). Mobil (Flutter), desktop (MAUI), Inventory, Laboratory, HR, Accounting, CRM, Imaging, AI modulları spesifikasiyanın Faza 2–3 hissəsidir və əvvəlcədən razılaşdırılmış plana görə bu MVP dilimlərinə daxil deyil.
+
+> Növbəti dilim: **8 Frontend (Next.js)**: Design System, auth, əsas ekranlar. Sonra Mərhələ 8 (Testing), 9 (Deployment), 10 (Documentation). Davam etmək üçün **"Davam et"** yazın.

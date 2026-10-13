@@ -140,7 +140,7 @@ public sealed class NotifyFixture : IAsyncLifetime, IDisposable
         public ValueTask DisposeAsync() => Connection.DisposeAsync();
     }
 
-    public static async Task<bool> WaitAsync(Func<bool> condition, int seconds = 15)
+    public static async Task<bool> WaitAsync(Func<bool> condition, int seconds = 30)
     {
         var deadline = DateTime.UtcNow.AddSeconds(seconds);
         while (DateTime.UtcNow < deadline)

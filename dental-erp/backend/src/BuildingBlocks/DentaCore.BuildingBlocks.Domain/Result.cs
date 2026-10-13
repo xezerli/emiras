@@ -10,6 +10,7 @@ public enum ErrorType
     PreconditionFailed,
     Locked,
     Gone,
+    Unavailable,
     Failure,
 }
 
@@ -33,6 +34,9 @@ public sealed record Error(string Code, string Message, ErrorType Type)
 
     /// <summary>Resurs/vəziyyət artıq mövcud deyil və bərpa olunmur (məs. sinxron kursoru köhnəlib: tam yenidən sinxron lazımdır).</summary>
     public static Error Gone(string code, string message) => new(code, message, ErrorType.Gone);
+
+    /// <summary>Xarici asılılıq (məs. axtarış mühərriki) müvəqqəti əlçatmazdır; klient təkrar cəhd edə və ya ehtiyat yola keçə bilər.</summary>
+    public static Error Unavailable(string code, string message) => new(code, message, ErrorType.Unavailable);
 
     public static Error Locked(string code, string message) => new(code, message, ErrorType.Locked);
 }
