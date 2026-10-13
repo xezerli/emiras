@@ -769,7 +769,7 @@ Işə salmaq: `infra/dev/run-stack.sh start` → `pnpm --filter @dentacore/web e
 
 - Təqvim gün siyahısıdır (həkim sütunları yox): həkim/kabinet adlarını verən endpoint hələ yoxdur (yalnız id var). Drag&drop, yeni qəbul formu, boş slot seçimi sonrakı iş.
 - Faktura yaratma/verilmə, geri qaytarma və smenin bağlanması UI-da yoxdur (API hazırdır).
-- E2E bazası təkrar işə salmalar arasında saxlanır: "smen yoxdur" xəta yolu yalnız təmiz bazada işləyir (smen artıq açıq olarsa test onu atlayır). Qəbul testi 5 dəqiqəlik təsadüfi slot seçir; gecə yarısına yaxın (< 2 saat) ilişə bilər.
+- E2E bazası təkrar işə salmalar arasında saxlanır: "smen yoxdur" xəta yolu yalnız təmiz bazada işləyir (smen artıq açıq olarsa test onu atlayır). Qəbul testi 5 dəqiqəlik təsadüfi boş slot seçir; Bakı vaxtı ilə gecə yarısına yaxın (qrafik 00:00–23:59, slot günü keçə bilməz) uyğun slot tapılmazsa test **atlanır** (uğursuz saymır). Gecə yarısı ilə təkrarlanan 3 tam işə salmada 13/13 və 12 keçdi + 1 atlandı.
 - E2E hələ CI-də deyil (Mərhələ 9). Elasticsearch ilə e2e ayrıca işə salınmayıb.
 
 > Növbəti: **Mərhələ 8 (Testing)**: bütün test pillələrinin (unit, inteqrasiya, e2e, yük, təhlükəsizlik) strategiyası, əhatə və boşluqların bağlanması. Sonra 9 (Deployment: CI, Docker, K8s) və 10 (Documentation). Davam etmək üçün **"Davam et"** yazın.
