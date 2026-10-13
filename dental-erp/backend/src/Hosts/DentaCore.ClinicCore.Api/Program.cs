@@ -1,3 +1,4 @@
+using DentaCore.BuildingBlocks.Infrastructure.Observability;
 using System.Globalization;
 using System.Text.Json;
 using DentaCore.Audit.Infrastructure;
@@ -19,6 +20,7 @@ using DentaCore.Sync.Application;
 using DentaCore.Sync.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddDentaCoreObservability(builder.Configuration, builder.Logging, "clinic-core-api");
 
 builder.Services.AddPatientModule(builder.Configuration);
 builder.Services.AddSchedulingModule(builder.Configuration);
@@ -37,7 +39,7 @@ app.UseAuthentication();
 app.UseMiddleware<TenantClaimGuardMiddleware>();
 app.UseAuthorization();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapDentaCoreHealth();
 
 var patients = app.MapGroup("/v1/patients").RequireAuthorization();
 

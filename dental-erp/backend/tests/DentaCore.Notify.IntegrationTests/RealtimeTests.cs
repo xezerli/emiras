@@ -34,7 +34,7 @@ public sealed class RealtimeTests(NotifyFixture f)
     {
         using var host = f.StartHost();
 
-        Assert.Equal(["GET /health"], EndpointSecurity.AnonymousRoutes(host.Services));
+        Assert.Equal(["GET /health", "GET /health/ready"], EndpointSecurity.AnonymousRoutes(host.Services));
         Assert.True(EndpointSecurity.RouteCount(host.Services) >= 2, "the hub route must be enumerated");
     }
 

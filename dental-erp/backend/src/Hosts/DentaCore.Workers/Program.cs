@@ -1,9 +1,11 @@
+using DentaCore.BuildingBlocks.Infrastructure.Observability;
 using DentaCore.Billing.Infrastructure;
 using DentaCore.BuildingBlocks.Infrastructure.Messaging;
 using DentaCore.Patient.Infrastructure;
 using DentaCore.Search.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddDentaCoreObservability(builder.Configuration, builder.Logging, "workers");
 
 builder.Services.AddPatientModule(builder.Configuration);
 builder.Services.AddBillingModule(builder.Configuration);
@@ -16,7 +18,7 @@ builder.Services.AddOutboxPublisher();      // consumer-lərdən SONRA: topologi
 builder.Services.AddTenantMaintenance();
 
 var app = builder.Build();
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapDentaCoreHealth();
 app.Run();
 
 public partial class Program;

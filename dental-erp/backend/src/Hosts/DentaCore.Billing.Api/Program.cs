@@ -1,3 +1,4 @@
+using DentaCore.BuildingBlocks.Infrastructure.Observability;
 using System.Globalization;
 using DentaCore.Audit.Infrastructure;
 using DentaCore.Billing.Application;
@@ -10,6 +11,7 @@ using DentaCore.Patient.Infrastructure;
 using DentaCore.Scheduling.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddDentaCoreObservability(builder.Configuration, builder.Logging, "billing-api");
 
 // Patient (IPatientDirectory) və Scheduling (ICareRelationships: həkimin "öz pasiyenti") Billing-in oxuduğu müqavilələri təmin edir
 builder.Services.AddPatientModule(builder.Configuration);
@@ -26,7 +28,7 @@ app.UseAuthentication();
 app.UseMiddleware<TenantClaimGuardMiddleware>();
 app.UseAuthorization();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapDentaCoreHealth();
 
 var billing = app.MapGroup("/v1").RequireAuthorization();
 

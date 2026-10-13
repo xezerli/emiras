@@ -1,3 +1,4 @@
+using DentaCore.BuildingBlocks.Infrastructure.Observability;
 using System.Net;
 using System.Security.Claims;
 using System.Threading.RateLimiting;
@@ -9,6 +10,7 @@ using DentaCore.Identity.Infrastructure;
 using Microsoft.AspNetCore.Http.HttpResults;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddDentaCoreObservability(builder.Configuration, builder.Logging, "identity-api");
 
 builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddIdentityAuthentication();
@@ -31,7 +33,7 @@ app.UseAuthentication();
 app.UseMiddleware<TenantClaimGuardMiddleware>();
 app.UseAuthorization();
 
-app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapDentaCoreHealth();
 
 var auth = app.MapGroup("/v1/auth").RequireRateLimiting("auth");
 

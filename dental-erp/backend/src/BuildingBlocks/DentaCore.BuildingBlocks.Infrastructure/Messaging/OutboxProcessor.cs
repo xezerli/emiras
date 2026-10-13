@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
+using DentaCore.BuildingBlocks.Infrastructure.Observability;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -73,6 +74,41 @@ public sealed partial class OutboxProcessor(
         return total;
     }
 
+    /// <summary>
+    /// Bütün tenant-lar üzrə gözləyən / ölü / ən köhnə outbox vəziyyətini ölçüb metrikaya yazır. Ölü mesajlar
+    /// (cəhd limiti aşılıb) heç vaxt öz-özünə göndərilmir: <c>dentacore.outbox.dead &gt; 0</c> əl müdaxiləsi tələb edən xəbərdarlıqdır.
+    /// </summary>
+    public async Task SampleStatsAsync(CancellationToken cancellationToken)
+    {
+        long pending = 0;
+        long dead = 0;
+        double oldest = 0;
+        var max = options.Value.OutboxMaxAttempts;
+        foreach (var tenant in await tenants.ListActiveAsync(cancellationToken))
+        {
+            try
+            {
+                await using var command = dataSources.Get(tenant.Schema).CreateCommand(
+                    "SELECT count(*) FILTER (WHERE attempts < $1), count(*) FILTER (WHERE attempts >= $1), " +
+                    "coalesce(extract(epoch FROM now() - min(occurred_at) FILTER (WHERE attempts < $1)), 0) FROM outbox_messages WHERE processed_at IS NULL");
+                command.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Integer, Value = max });
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    pending += reader.GetInt64(0);
+                    dead += reader.GetInt64(1);
+                    oldest = Math.Max(oldest, Convert.ToDouble(reader.GetValue(2), System.Globalization.CultureInfo.InvariantCulture));
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogTenantFailed(logger, tenant.Slug, ex);
+            }
+        }
+
+        DentaCoreMetrics.SetOutboxSnapshot(pending, dead, oldest);
+    }
+
     private async Task<int> ProcessTenantAsync(TenantInfo tenant, CancellationToken cancellationToken)
     {
         var o = options.Value;
@@ -106,9 +142,11 @@ public sealed partial class OutboxProcessor(
                     JsonDocument.Parse(message.Payload).RootElement.Clone());
                 await publisher.PublishAsync(envelope, cancellationToken);
                 sent.Add(message.Id);
+                DentaCoreMetrics.RecordPublished(message.OccurredAt, DateTimeOffset.UtcNow);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                DentaCoreMetrics.RecordPublishFailure();
                 await using var fail = new NpgsqlCommand(
                     "UPDATE outbox_messages SET attempts = attempts + 1, last_error = left($2, 500), next_attempt_at = now() + least(interval '1 hour', interval '5 seconds' * power(2, attempts)) WHERE id = $1",
                     connection, transaction);
@@ -139,12 +177,18 @@ public sealed class OutboxPublisherService(OutboxProcessor processor, IOptions<R
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        var nextSample = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
             var sent = 0;
             try
             {
                 sent = await processor.ProcessOnceAsync(stoppingToken);
+                if (DateTimeOffset.UtcNow >= nextSample)
+                {
+                    nextSample = DateTimeOffset.UtcNow.AddSeconds(15);
+                    await processor.SampleStatsAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException)
             {

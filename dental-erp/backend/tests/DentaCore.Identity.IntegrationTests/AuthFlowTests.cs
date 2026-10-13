@@ -143,7 +143,7 @@ public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
         var anonymous = EndpointSecurity.AnonymousRoutes(_factory.Services);
 
         Assert.True(EndpointSecurity.RouteCount(_factory.Services) >= 5, "route enumeration must actually see the API surface");
-        Assert.Equal(["GET /health", "POST /v1/auth/login", "POST /v1/auth/refresh"], anonymous);
+        Assert.Equal(["GET /health", "GET /health/ready", "POST /v1/auth/login", "POST /v1/auth/refresh"], anonymous);
     }
 
     [IntegrationFact]

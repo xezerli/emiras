@@ -11,6 +11,6 @@ public sealed class EndpointSecurityTests(PatientApiFixture f)
         var services = f.Factory!.Services;
 
         Assert.True(EndpointSecurity.RouteCount(services) > 40, "route enumeration must actually see the API surface");
-        Assert.Equal(["GET /health"], EndpointSecurity.AnonymousRoutes(services));
+        Assert.Equal(["GET /health", "GET /health/ready"], EndpointSecurity.AnonymousRoutes(services));
     }
 }
