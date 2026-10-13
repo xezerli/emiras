@@ -568,14 +568,14 @@ paths:
       summary: Kassa smenini aç
       x-permission: payment:write
       requestBody: { required: true, content: { application/json: { schema: { type: object, required: [branchId, openingCash], properties: { branchId: { type: string, format: uuid }, openingCash: { type: number } } } } } }
-      responses: { '201': { description: OK } }
+      responses: { '201': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CashShift' } } } } }
   /cash-shifts/current:
     get:
       operationId: getCashShiftsCurrent
       tags: [Billing]
       summary: Cari istifadəçinin açıq smeni (yoxdursa 404)
       x-permission: payment:write
-      responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/Problem' } }
+      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CashShift' } } } }, '404': { $ref: '#/components/responses/Problem' } }
   /cash-shifts/{shiftId}/close:
     post:
       operationId: postCashShiftsByShiftClose
@@ -890,9 +890,32 @@ components:
             balance: { type: number, description: 'Cari borc. Billing modulu hazır olana qədər qaytarılmır' }
             rowVersion: { type: integer }
             createdAt: { type: string, format: date-time }
+    PatientListItem:
+      type: object
+      description: Siyahı elementi (yüngül). Telefon həmişə maskalıdır; tam kart GET /patients/{id}
+      properties:
+        id: { type: string, format: uuid }
+        chartNo: { type: integer, format: int64 }
+        branchId: { type: string, format: uuid }
+        firstName: { type: string }
+        lastName: { type: string }
+        birthDate: { type: [string, 'null'], format: date }
+        phoneMasked: { type: [string, 'null'] }
     PatientPage:
       type: object
-      properties: { items: { type: array, items: { $ref: '#/components/schemas/Patient' } }, nextCursor: { type: [string, 'null'] } }
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/PatientListItem' } }, nextCursor: { type: [string, 'null'] } }
+    CashShift:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        branchId: { type: string, format: uuid }
+        cashierId: { type: string, format: uuid }
+        openedAt: { type: string, format: date-time }
+        closedAt: { type: [string, 'null'], format: date-time }
+        openingCash: { type: number }
+        closingCash: { type: [number, 'null'] }
+        expectedCash: { type: [number, 'null'] }
+        difference: { type: [number, 'null'] }
     Allergy:
       type: object
       required: [substance]
@@ -1108,24 +1131,47 @@ components:
               quantity: { type: integer, minimum: 1 }
               unitPrice: { type: number, minimum: 0 }
               discount: { type: number, minimum: 0 }
+    InvoiceItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        serviceId: { type: [string, 'null'], format: uuid }
+        planItemId: { type: [string, 'null'], format: uuid }
+        description: { type: string }
+        toothFdi: { type: [integer, 'null'] }
+        providerId: { type: [string, 'null'], format: uuid }
+        quantity: { type: integer }
+        unitPrice: { type: number }
+        discount: { type: number }
+        vatRate: { type: number }
+        lineTotal: { type: number }
     Invoice:
-      allOf:
-        - $ref: '#/components/schemas/InvoiceCreate'
-        - type: object
-          properties:
-            id: { type: string, format: uuid }
-            number: { type: string }
-            status: { $ref: '#/components/schemas/InvoiceStatus' }
-            currency: { type: string }
-            subtotal: { type: number }
-            discountTotal: { type: number }
-            taxTotal: { type: number }
-            total: { type: number }
-            paidTotal: { type: number }
-            insuranceAmount: { type: number }
-            balance: { type: number, description: total - paidTotal - insuranceAmount }
-            rowVersion: { type: integer }
-            payments: { type: array, items: { $ref: '#/components/schemas/Payment' }, description: Yalnız detal sorğusunda }
+      type: object
+      description: Cavab sxemi (InvoiceCreate sorğu sxemidir)
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: string }
+        kind: { type: string, enum: [estimate, invoice] }
+        branchId: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        providerId: { type: [string, 'null'], format: uuid }
+        visitId: { type: [string, 'null'], format: uuid }
+        planId: { type: [string, 'null'], format: uuid }
+        status: { $ref: '#/components/schemas/InvoiceStatus' }
+        currency: { type: string }
+        subtotal: { type: number }
+        discountTotal: { type: number }
+        taxTotal: { type: number }
+        total: { type: number }
+        paidTotal: { type: number }
+        insuranceAmount: { type: number }
+        balance: { type: number, description: total - paidTotal - insuranceAmount }
+        issuedAt: { type: [string, 'null'], format: date-time }
+        dueDate: { type: [string, 'null'], format: date }
+        createdAt: { type: string, format: date-time }
+        rowVersion: { type: integer }
+        items: { type: array, items: { $ref: '#/components/schemas/InvoiceItem' } }
+        payments: { type: [array, 'null'], items: { $ref: '#/components/schemas/Payment' }, description: Yalnız detal sorğusunda }
     PaymentCreate:
       type: object
       required: [method, amount]

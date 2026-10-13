@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError, createApiClient, ifMatch, newIdempotencyKey, unwrap } from "../src";
+import { ApiError, createApiClient, ifMatch, newIdempotencyKey, toApiError, unwrap } from "../src";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -116,5 +116,15 @@ describe("errors and helpers", () => {
   it("idempotency keys are unique and If-Match is quoted", () => {
     expect(newIdempotencyKey()).not.toBe(newIdempotencyKey());
     expect(ifMatch(7)).toEqual({ "If-Match": '"7"' });
+  });
+});
+
+describe("toApiError", () => {
+  it("builds from a parsed body without touching the consumed response", () => {
+    const e = toApiError({ code: "x.y", title: "T", detail: "D", extra: 1 }, new Response(null, { status: 422 }));
+    expect([e.status, e.code, e.title, e.message, e.extensions]).toEqual([422, "x.y", "T", "D", { extra: 1 }]);
+  });
+  it("tolerates a missing/undefined body", () => {
+    expect(toApiError(undefined, new Response(null, { status: 500, statusText: "Err" })).code).toBe("http.500");
   });
 });

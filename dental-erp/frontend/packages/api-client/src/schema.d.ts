@@ -1210,9 +1210,39 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        /** @description Siyahı elementi (yüngül). Telefon həmişə maskalıdır; tam kart GET /patients/{id} */
+        PatientListItem: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: int64 */
+            chartNo?: number;
+            /** Format: uuid */
+            branchId?: string;
+            firstName?: string;
+            lastName?: string;
+            /** Format: date */
+            birthDate?: string | null;
+            phoneMasked?: string | null;
+        };
         PatientPage: {
-            items?: components["schemas"]["Patient"][];
+            items?: components["schemas"]["PatientListItem"][];
             nextCursor?: string | null;
+        };
+        CashShift: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            branchId?: string;
+            /** Format: uuid */
+            cashierId?: string;
+            /** Format: date-time */
+            openedAt?: string;
+            /** Format: date-time */
+            closedAt?: string | null;
+            openingCash?: number;
+            closingCash?: number | null;
+            expectedCash?: number | null;
+            difference?: number | null;
         };
         Allergy: {
             /** Format: uuid */
@@ -1492,10 +1522,40 @@ export interface components {
                 discount?: number;
             }[];
         };
-        Invoice: components["schemas"]["InvoiceCreate"] & {
+        InvoiceItem: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            serviceId?: string | null;
+            /** Format: uuid */
+            planItemId?: string | null;
+            description?: string;
+            toothFdi?: number | null;
+            /** Format: uuid */
+            providerId?: string | null;
+            quantity?: number;
+            unitPrice?: number;
+            discount?: number;
+            vatRate?: number;
+            lineTotal?: number;
+        };
+        /** @description Cavab sxemi (InvoiceCreate sorğu sxemidir) */
+        Invoice: {
             /** Format: uuid */
             id?: string;
             number?: string;
+            /** @enum {string} */
+            kind?: "estimate" | "invoice";
+            /** Format: uuid */
+            branchId?: string;
+            /** Format: uuid */
+            patientId?: string;
+            /** Format: uuid */
+            providerId?: string | null;
+            /** Format: uuid */
+            visitId?: string | null;
+            /** Format: uuid */
+            planId?: string | null;
             status?: components["schemas"]["InvoiceStatus"];
             currency?: string;
             subtotal?: number;
@@ -1506,9 +1566,16 @@ export interface components {
             insuranceAmount?: number;
             /** @description total - paidTotal - insuranceAmount */
             balance?: number;
+            /** Format: date-time */
+            issuedAt?: string | null;
+            /** Format: date */
+            dueDate?: string | null;
+            /** Format: date-time */
+            createdAt?: string;
             rowVersion?: number;
+            items?: components["schemas"]["InvoiceItem"][];
             /** @description Yalnız detal sorğusunda */
-            payments?: components["schemas"]["Payment"][];
+            payments?: components["schemas"]["Payment"][] | null;
         };
         PaymentCreate: {
             /**
@@ -3112,7 +3179,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CashShift"];
+                };
             };
         };
     };
@@ -3130,7 +3199,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["CashShift"];
+                };
             };
             404: components["responses"]["Problem"];
         };

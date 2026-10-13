@@ -38,19 +38,22 @@ export class ApiError extends Error {
   }
 }
 
+/** Builds an ApiError from an already-parsed openapi-fetch result (the body has been consumed, so `response.clone()` is useless). */
+export function toApiError(error: unknown, response: Response): ApiError {
+  const e = (error && typeof error === "object" ? error : {}) as Record<string, unknown>;
+  const { type: _t, title, status: _s, detail, instance: _i, code, ...extensions } = e;
+  return new ApiError(
+    response.status,
+    typeof code === "string" ? code : `http.${response.status}`,
+    typeof title === "string" ? title : response.statusText || "Request failed",
+    typeof detail === "string" ? detail : undefined,
+    extensions,
+  );
+}
+
 /** Unwraps an openapi-fetch result: returns data or throws ApiError. */
 export function unwrap<T>(result: { data?: T; error?: unknown; response: Response }): T {
-  if (result.error !== undefined || !result.response.ok) {
-    const e = (result.error ?? {}) as Record<string, unknown>;
-    const { type: _t, title, status: _s, detail, instance: _i, code, ...extensions } = e;
-    throw new ApiError(
-      result.response.status,
-      typeof code === "string" ? code : `http.${result.response.status}`,
-      typeof title === "string" ? title : result.response.statusText || "Request failed",
-      typeof detail === "string" ? detail : undefined,
-      extensions,
-    );
-  }
+  if (result.error !== undefined || !result.response.ok) throw toApiError(result.error, result.response);
   return result.data as T;
 }
 
