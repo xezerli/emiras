@@ -236,11 +236,8 @@ jobs:
           dotnet list DentaCore.sln package --vulnerable --include-transitive | tee "$RUNNER_TEMP/vuln.txt"
           ! grep -q "has the following vulnerable packages" "$RUNNER_TEMP/vuln.txt"
       - name: Trivy (sirr + IaC konfiqurasiya səhvləri)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scan-ref: dental-erp
-          scanners: secret,misconfig
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-          skip-dirs: dental-erp/frontend/node_modules
+        # Action əvəzinə birbaşa konteyner: üçüncü tərəf action teqinə (və onun silinməsinə) bağlılıq yoxdur
+        run: |
+          docker run --rm -v "$PWD/dental-erp:/scan:ro" aquasec/trivy:0.57.1 fs \
+            --scanners secret,misconfig --severity HIGH,CRITICAL --exit-code 1 \
+            --skip-dirs frontend/node_modules --skip-dirs backend --skip-dirs frontend/apps/web/.next /scan

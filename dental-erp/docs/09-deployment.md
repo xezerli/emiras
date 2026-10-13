@@ -46,7 +46,7 @@ Xarici asılılıqlar (PostgreSQL 16, RabbitMQ 3.13, Redis 7, Elasticsearch 8.11
 | Backup / restore | `infra/backup/test-backup.sh` (real PG, 7 ssenari: tam və tək-tenant bərpa, yanlış açar, zədələnmə, saxta say) | ✅ |
 | GitHub Actions (`ci.yml`, `codeql.yml`, `release.yml`) | `actionlint` | ✅ sintaksis/ifadələr; **heç vaxt icra olunmayıb**, action-lar teq ilə (SHA ilə deyil) |
 | Prometheus + Grafana + Collector compose profili | Yalnız konfiqurasiya sintaksisi | ⚠ qaldırılmayıb; dashboard JSON-u Grafana-da açılmayıb |
-| Trivy / CodeQL / cosign | İcra olunmayıb | ❌ |
+| Trivy / CodeQL / cosign | CI ilk işə düşəndə `aquasecurity/trivy-action@0.28.0` teqi tapılmadı (job başlamadı): action əvəzinə birbaşa `aquasec/trivy:0.57.1` konteyneri çağırılır; konteyner teqi özü hələ təsdiqlənməyib | ⚠ |
 
 **İlk real deploy-da gözlənilən sürtünmə:** CI-nin ilk işə salınması çox güman ki, kiçik problemlər tapacaq (RabbitMQ `guest` loopback, ES yaddaşı, runner vaxtı). Bunlar gözlənilir, "hazırdır" demək olmaz.
 

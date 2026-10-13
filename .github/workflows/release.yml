@@ -55,12 +55,9 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
       - name: Trivy imic skanı (düzəldilə bilən HIGH/CRITICAL varsa dayanır)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: scan:${{ matrix.name }}
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.57.1 image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 scan:${{ matrix.name }}
       - name: Push
         id: push
         uses: docker/build-push-action@v6
