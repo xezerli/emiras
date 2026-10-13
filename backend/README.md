@@ -46,3 +46,57 @@ sənədləşdirilmiş ictimai API deyil, brauzerin şəbəkə sorğularından ç
     AZAPI_DOMAIN=api.sizin-domen.az docker compose up -d --build
 Domenin A qeydi serverin IP-sinə yönəlməlidir. Sonra 1C emalında `HTTPСоединение("api.sizin-domen.az", ...)`.
 Qeyd: sessiyalar yaddaşdadır, ona görə yalnız bir `api` instansı işlədin.
+
+## Excel çıxarışından bank əməliyyatları (hazırdır)
+`POST /api/1c/statement` `{"filename": "...", "data": "<xlsx base64>"}`: bank formatı avtomatik tanınır
+(ABB, Accessbank, AIIB, Bank Respublika) və `bank_ops` sətirləri qaytarılır. Cavabın `message` sahəsində
+"ilkin qalıq + mədaxil - məxaric = son qalıq" yoxlaması var: uyğun gəlməsə xəbərdarlıq yazılır.
+Yeni bank = `app/statements/<bank>.py` (nümunə: `respublika.py`), `@register_parser(detect)` ilə.
+
+### 1C emalına əlavə ediləcək kod (yeni "Bank_Excel" əmri)
+Əmri formaya əlavə edin (Команды -> Bank_Excel), düyməni Bank → Əməliyyatlar tabına qoyun:
+
+    &НаКлиенте
+    Процедура Bank_Excel(Команда)
+        Диалог = Новый ДиалогВыбораФайла(РежимДиалогаВыбораФайла.Открытие);
+        Диалог.Фильтр = "Excel (*.xlsx)|*.xlsx";
+        Если Не Диалог.Выбрать() Тогда
+            Возврат;
+        КонецЕсли;
+        HTTPRequest.АдресРесурса = "api/1c/statement";
+        Данные = Новый Структура;
+        Данные.Вставить("filename", Диалог.ПолноеИмяФайла);
+        Данные.Вставить("data", Base64Строка(Новый ДвоичныеДанные(Диалог.ПолноеИмяФайла)));
+        ЗаписьJSON = Новый ЗаписьJSON;
+        ЗаписьJSON.УстановитьСтроку();
+        ЗаписатьJSON(ЗаписьJSON, Данные);
+        HTTPRequest.УстановитьТелоИзСтроки(ЗаписьJSON.Закрыть(), КодировкаТекста.UTF8, ИспользованиеByteOrderMark.НеИспользовать);
+        HTTPResponse = HTTPConnection.ВызватьHTTPМетод("POST", HTTPRequest);
+        ЧтениеJSON = Новый ЧтениеJSON;
+        ЧтениеJSON.УстановитьСтроку(HTTPResponse.ПолучитьТелоКакСтроку());
+        response = ПрочитатьJSON(ЧтениеJSON, Истина);
+        ЧтениеJSON.Закрыть();
+        Если response["message"] <> "" Тогда
+            Сообщение = Новый СообщениеПользователю();
+            Сообщение.Текст = response["message"];
+            Сообщение.Сообщить();
+        КонецЕсли;
+        Если response["success"] Тогда
+            Для Каждого str Из response["data"] Цикл
+                row = Объект.bank_ops.Добавить();
+                Для Каждого c Из str Цикл
+                    Если c.Ключ = "c4" Тогда
+                        Попытка
+                            row[c.Ключ] = Дата(Лев(СтрЗаменить(СтрЗаменить(СтрЗаменить(СтрЗаменить(c.Значение,"-",""),"T",""),":",""),".",""),14));
+                        Исключение
+                        КонецПопытки;
+                    Иначе
+                        row[c.Ключ] = c.Значение;
+                    КонецЕсли;
+                КонецЦикла;
+            КонецЦикла;
+        КонецЕсли;
+    КонецПроцедуры
+
+Qeyd: `c1..c13` açarları `bank_ops` rekvizitlərinin adları ilə eyni olmalıdır, fərqlidirsə `to_rows`-da düzəldin.
+Kod yoxlanmayıb: 1C-də sınamaq lazımdır.
