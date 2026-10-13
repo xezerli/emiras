@@ -1,4 +1,5 @@
 using System.Net;
+using DentaCore.TestSupport;
 using System.Text.Json;
 using DentaCore.BuildingBlocks.Infrastructure.Messaging;
 using Microsoft.AspNetCore.Http.Connections;
@@ -28,6 +29,15 @@ public sealed class RealtimeTests(NotifyFixture f)
     private static Guid IdOf(JsonElement n, string property) => n.GetProperty(property).GetGuid();
 
     // ---------------- Connection ----------------
+    [NotifyFact]
+    public void Every_route_requires_authorization_except_the_health_probe()
+    {
+        using var host = f.StartHost();
+
+        Assert.Equal(["GET /health"], EndpointSecurity.AnonymousRoutes(host.Services));
+        Assert.True(EndpointSecurity.RouteCount(host.Services) >= 2, "the hub route must be enumerated");
+    }
+
     [NotifyFact]
     public async Task Connection_without_a_valid_token_is_refused()
     {

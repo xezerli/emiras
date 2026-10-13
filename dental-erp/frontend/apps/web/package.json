@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "e2e": "playwright test",
-    "e2e:build": "API_ORIGIN=${E2E_API_ORIGIN:-http://127.0.0.1:5100} NEXT_PUBLIC_DEV_TENANT=${E2E_TENANT:-demo} next build"
+    "e2e:build": "API_ORIGIN=${E2E_API_ORIGIN:-http://127.0.0.1:5100} NEXT_PUBLIC_DEV_TENANT=${E2E_TENANT:-demo} next build",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@dentacore/api-client": "workspace:*",

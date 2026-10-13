@@ -5,7 +5,18 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
-  "scripts": { "typecheck": "tsc -p tsconfig.json", "lint": "tsc -p tsconfig.json", "test": "vitest run" },
-  "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" },
-  "devDependencies": { "react": "^19.2.0", "react-dom": "^19.2.0" }
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
 }

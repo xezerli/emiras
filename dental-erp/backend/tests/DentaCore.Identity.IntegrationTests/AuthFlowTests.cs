@@ -138,6 +138,15 @@ public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
     }
 
     [IntegrationFact]
+    public void Only_the_credential_exchange_endpoints_are_anonymous()
+    {
+        var anonymous = EndpointSecurity.AnonymousRoutes(_factory.Services);
+
+        Assert.True(EndpointSecurity.RouteCount(_factory.Services) >= 5, "route enumeration must actually see the API surface");
+        Assert.Equal(["GET /health", "POST /v1/auth/login", "POST /v1/auth/refresh"], anonymous);
+    }
+
+    [IntegrationFact]
     public async Task Invalid_input_returns_422_validation_problem()
     {
         var response = await _client.PostAsJsonAsync("/v1/auth/login", new { email = "not-an-email", password = "" });
