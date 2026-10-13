@@ -53,8 +53,8 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
       rabbitmq:
         image: rabbitmq:3.13-alpine
-        # Konteynerə port xəritəsi ilə qoşulanda RabbitMQ bağlantını "loopback" saymır və `guest`-i rədd edir; yalnız CI test brokeri üçün söndürülür
-        env: { RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users none" }
+        # `guest` yalnız loopback-dən qoşula bilər; konteynerə port xəritəsi ilə qoşulanda rədd olunur (CI-də təsdiqləndi). Adi istifadəçi yaradılır
+        env: { RABBITMQ_DEFAULT_USER: ci, RABBITMQ_DEFAULT_PASS: ci }
         ports: ["5672:5672"]
         options: >-
           --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 10s --health-timeout 5s --health-retries 20
@@ -73,7 +73,7 @@ jobs:
           --health-cmd "curl -fs http://localhost:9200/_cluster/health" --health-interval 10s --health-timeout 5s --health-retries 30
     env:
       DENTACORE_TEST_PG: Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=postgres
-      DENTACORE_TEST_AMQP: amqp://guest:guest@localhost:5672/
+      DENTACORE_TEST_AMQP: amqp://ci:ci@localhost:5672/
       DENTACORE_TEST_REDIS: localhost:6379
       DENTACORE_TEST_ES: http://localhost:9200
     steps:
@@ -134,14 +134,15 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
       rabbitmq:
         image: rabbitmq:3.13-alpine
-        # Konteynerə port xəritəsi ilə qoşulanda RabbitMQ bağlantını "loopback" saymır və `guest`-i rədd edir; yalnız CI test brokeri üçün söndürülür
-        env: { RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users none" }
+        # `guest` yalnız loopback-dən qoşula bilər; konteynerə port xəritəsi ilə qoşulanda rədd olunur (CI-də təsdiqləndi). Adi istifadəçi yaradılır
+        env: { RABBITMQ_DEFAULT_USER: ci, RABBITMQ_DEFAULT_PASS: ci }
         ports: ["5672:5672"]
         options: >-
           --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 10s --health-timeout 5s --health-retries 20
     env:
       DENTACORE_PG: Host=localhost;Port=5432;Username=postgres;Password=postgres
       DENTACORE_PG_URL: postgresql://postgres:postgres@localhost:5432
+      DENTACORE_AMQP: amqp://ci:ci@localhost:5672/
       SEED_PASSWORD: Passw0rd!e2e
       E2E_PASSWORD: Passw0rd!e2e
       CI: "true"
