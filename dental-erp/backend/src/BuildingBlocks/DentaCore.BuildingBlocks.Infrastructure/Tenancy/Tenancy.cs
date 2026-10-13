@@ -22,6 +22,36 @@ public sealed class TenancyOptions
 
     /// <summary>X-Tenant header-i yalnız dev/test üçün. İstehsalda tenant yalnız domendən təyin olunur.</summary>
     public bool AllowTenantHeader { get; set; }
+
+    /// <summary>
+    /// Local Server (tək klinika) quraşdırması: bütün sorğular bu tenant-a aiddir, host adı və X-Tenant nəzərə alınmır
+    /// (IP ilə və ya "clinic.local" ilə açmaq mümkün olsun, başqa tenant seçmək mümkün olmasın). Cloud-da təyin OLUNMAMALIDIR.
+    /// </summary>
+    public string? FixedTenant { get; set; }
+}
+
+/// <summary>Sorğudan tenant slug-ının təyini (təmiz funksiya: asanlıqla sınanır).</summary>
+public static class TenantSlugResolver
+{
+    public static string? Resolve(string host, IReadOnlyList<string> tenantHeader, TenancyOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(tenantHeader);
+        ArgumentNullException.ThrowIfNull(options);
+        if (!string.IsNullOrWhiteSpace(options.FixedTenant))
+        {
+            return options.FixedTenant;
+        }
+
+        // Tək dəyər: təkrarlanan başlıq qəsdən qarışdırma cəhdi sayılır, rədd olunur
+        if (options.AllowTenantHeader && tenantHeader.Count == 1)
+        {
+            return tenantHeader[0];
+        }
+
+        var suffix = "." + options.BaseDomain;
+        return host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) && host.Length > suffix.Length ? host[..^suffix.Length] : null;
+    }
 }
 
 public sealed class TenantContext : ITenantContext
@@ -159,17 +189,11 @@ public sealed class TenantResolutionMiddleware(RequestDelegate next, IOptions<Te
         await next(context);
     }
 
-    private static string? ExtractSlug(HttpContext context, TenancyOptions options)
-    {
-        if (options.AllowTenantHeader && context.Request.Headers.TryGetValue("X-Tenant", out var header) && header.Count == 1)
-        {
-            return header[0];
-        }
-
-        var host = context.Request.Host.Host;
-        var suffix = "." + options.BaseDomain;
-        return host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ? host[..^suffix.Length] : null;
-    }
+    private static string? ExtractSlug(HttpContext context, TenancyOptions options) =>
+        TenantSlugResolver.Resolve(
+            context.Request.Host.Host,
+            context.Request.Headers.TryGetValue("X-Tenant", out var header) ? header.ToArray().Select(h => h ?? string.Empty).ToList() : [],
+            options);
 }
 
 public static class TenancyServiceCollectionExtensions

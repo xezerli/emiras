@@ -1,0 +1,88 @@
+# promtool test rules dentacore_test.yml
+rule_files: [dentacore.yml]
+evaluation_interval: 1m
+tests:
+  - name: dead letters fire after 5 minutes
+    interval: 1m
+    input_series:
+      - { series: 'dentacore_outbox_dead{service_name="workers"}', values: "0 0 1+0x10" }
+    alert_rule_test:
+      - { eval_time: 5m, alertname: OutboxDeadLetters, exp_alerts: [] }
+      - eval_time: 9m
+        alertname: OutboxDeadLetters
+        exp_alerts:
+          - exp_labels: { severity: critical, service_name: workers }
+            exp_annotations:
+              summary: "Cəhd limiti aşılmış outbox mesajları var (1)"
+              description: "Bu mesajlar öz-özünə göndərilmir. last_error-a baxın, səbəbi düzəldin, sonra attempts=0 edin. Runbook: docs/09-deployment.md §9."
+
+  - name: healthy backlog does not alert
+    interval: 1m
+    input_series:
+      - { series: 'dentacore_outbox_oldest_age_seconds{service_name="workers"}', values: "1+0x30" }
+      - { series: 'dentacore_outbox_pending{service_name="workers"}', values: "3+0x30" }
+      - { series: 'dentacore_outbox_published_total{service_name="workers"}', values: "0+10x30" }
+    alert_rule_test:
+      - { eval_time: 20m, alertname: OutboxBacklogAge, exp_alerts: [] }
+      - { eval_time: 20m, alertname: OutboxPublisherStalled, exp_alerts: [] }
+
+  - name: stalled publisher
+    interval: 1m
+    input_series:
+      - { series: 'dentacore_outbox_pending{service_name="workers"}', values: "5+0x30" }
+      - { series: 'dentacore_outbox_published_total{service_name="workers"}', values: "100+0x30" }
+      - { series: 'dentacore_outbox_oldest_age_seconds{service_name="workers"}', values: "200+0x30" }
+    alert_rule_test:
+      - { eval_time: 5m, alertname: OutboxPublisherStalled, exp_alerts: [] }          # for: 10m hələ dolmayıb
+      - eval_time: 20m
+        alertname: OutboxPublisherStalled
+        exp_alerts:
+          - exp_labels: { severity: critical, service_name: workers }
+            exp_annotations: { summary: "Gözləyən mesaj var, amma 10 dəqiqədir heç biri göndərilmir" }
+      - eval_time: 20m
+        alertname: OutboxBacklogAge
+        exp_alerts:
+          - exp_labels: { severity: warning, service_name: workers }
+            exp_annotations:
+              summary: "Ən köhnə göndərilməmiş hadisə 3m 20s yaşındadır"
+              description: "Workers işləmir, broker əlçatmazdır və ya geriləmə var. Canlı bildirişlər, axtarış indeksi və xəbərdarlıqlar gecikir."
+
+  - name: long running write transaction
+    interval: 1m
+    input_series:
+      - { series: 'pg_long_running_tx_oldest_write_seconds', values: "10 10 400+0x10" }
+    alert_rule_test:
+      - { eval_time: 3m, alertname: PostgresLongRunningWriteTransaction, exp_alerts: [] }
+      - eval_time: 8m
+        alertname: PostgresLongRunningWriteTransaction
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: "5 dəqiqədən uzun açıq YAZI tranzaksiyası (6m 40s)"
+              description: "pg_snapshot_xmin horizontunu saxlayır: sync pull və axtarış indexer-i geridə qalır, VACUUM təmizləyə bilmir."
+
+  - name: 5xx ratio
+    interval: 1m
+    input_series:
+      - { series: 'http_server_request_duration_seconds_count{service_name="billing-api",http_response_status_code="200"}', values: "0+90x30" }
+      - { series: 'http_server_request_duration_seconds_count{service_name="billing-api",http_response_status_code="500"}', values: "0+10x30" }
+      - { series: 'http_server_request_duration_seconds_count{service_name="clinic-core-api",http_response_status_code="200"}', values: "0+100x30" }
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HighServerErrorRatio
+        exp_alerts:
+          - exp_labels: { severity: critical, service_name: billing-api }
+            exp_annotations: { summary: "billing-api: 5xx nisbəti 2%-dən yuxarı" }
+
+  - name: missing telemetry
+    interval: 1m
+    input_series:
+      - { series: 'dentacore_outbox_pending{service_name="workers"}', values: "0+0x5 _x30" }
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ServiceTelemetryMissing
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: "Workers 10 dəqiqədir metrika göndərmir"
+              description: "Workers (outbox publisher) işləmir və ya OTel Collector əlçatmazdır."

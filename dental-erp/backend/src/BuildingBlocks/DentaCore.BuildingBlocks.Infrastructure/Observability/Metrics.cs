@@ -22,6 +22,9 @@ public static class DentaCoreMetrics
 
     static DentaCoreMetrics()
     {
+        // Sayğaclar ilk artıma qədər ixrac olunmur; "göndərilən sayı 0-dır" qaydası (OutboxPublisherStalled) üçün sıfır nöqtəsi ilk dəqiqədən görünməlidir
+        Published.Add(0);
+        PublishFailures.Add(0);
         Meter.CreateObservableGauge("dentacore.outbox.pending", () => _outbox.Pending, "{message}", "Göndərilməyi gözləyən outbox mesajları (cəhd limiti aşılmayanlar)");
         Meter.CreateObservableGauge("dentacore.outbox.dead", () => _outbox.Dead, "{message}", "Cəhd limiti aşılmış, əl müdaxiləsi gözləyən outbox mesajları");
         Meter.CreateObservableGauge("dentacore.outbox.oldest_age", () => _outbox.OldestAgeSeconds, "s", "Ən köhnə göndərilməmiş outbox mesajının yaşı");

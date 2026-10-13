@@ -56,6 +56,8 @@ case "${1:-}" in
                 src/Hosts/DentaCore.Notify.Api src/Hosts/DentaCore.Workers src/Hosts/DentaCore.Gateway tools/DentaCore.DevSeed; do
       ( cd "$ROOT/backend" && dotnet build -v q --nologo "$proj" 2>&1 | grep -E "error|Build FAILED" || true )
     done
+    # Sxem versiyalı miqrasiya icraçısı ilə qurulur (db/migrate.sh), DevSeed yalnız başlanğıc məlumatı yazır
+    ( export DATABASE_URL="postgresql:///$DB?host=/tmp&port=54329&user=postgres"; "$ROOT/db/migrate.sh" create-tenant "${SEED_SLUG:-demo}" >/dev/null )
     ( common_env; export DENTACORE_DB="$ConnectionStrings__Default"; cd "$ROOT/backend" && dotnet tools/DentaCore.DevSeed/bin/Debug/net9.0/DentaCore.DevSeed.dll "${SEED_SLUG:-demo}" ${SEED_PASSWORD:+"$SEED_PASSWORD"} | tee "$DIR/seed.txt" )
     PUB="Jwt__PublicKeyPem=$(cat "$DIR/jwt.pub")"
     launch identity DentaCore.Identity.Api 5101 "Jwt__SigningKeyPem=$(cat "$DIR/jwt.key")" "Jwt__PublicKeyPem=$(cat "$DIR/jwt.pub")"

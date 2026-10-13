@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # Tətbiq metrikaları OTel Collector-dan (OTLP → Prometheus ixracçısı)
+  - job_name: otel-collector
+    static_configs: [{ targets: ["otel-collector:8889"] }]
+  # Aşağıdakı iki iş cluster-də mövcud olduqda (postgres_exporter, RabbitMQ prometheus plugini :15692)
+  - job_name: postgres
+    static_configs: [{ targets: ["postgres-exporter:9187"] }]
+  - job_name: rabbitmq
+    static_configs: [{ targets: ["rabbitmq:15692"] }]
