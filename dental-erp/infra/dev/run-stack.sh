@@ -2,7 +2,9 @@
 # Yerli / e2e üçün bütün backend servislərini qaldırır: Identity, ClinicCore, Billing, Notify, Workers, Gateway.
 # İstifadə:  infra/dev/run-stack.sh start | stop | env
 # Tələb: PostgreSQL və RabbitMQ əvvəlcədən işləyir (Redis və Elasticsearch könüllüdür).
-#   DENTACORE_PG    PostgreSQL superuser bağlantısı (db adı OLMADAN), default: Host=/tmp;Port=54329;Username=postgres
+#   DENTACORE_PG    PostgreSQL superuser bağlantısı (Npgsql, db adı OLMADAN), default: Host=/tmp;Port=54329;Username=postgres
+#   DENTACORE_PG_URL  eyni server üçün psql URL-i (db adı OLMADAN), default: postgresql:///POSTGRES?host=/tmp&port=54329&user=postgres
+#                     (CI: postgresql://postgres:postgres@localhost:5432)
 #   DENTACORE_AMQP  default: amqp://guest:guest@localhost:5672/
 #   DENTACORE_REDIS (könüllü) məs. 127.0.0.1:6390     DENTACORE_ES (könüllü) məs. http://127.0.0.1:9200
 #   STACK_DIR       log/pid/açar qovluğu, default /tmp/dentacore-stack     STACK_DB  default dentacore_e2e
@@ -15,6 +17,9 @@ DB="${STACK_DB:-dentacore_e2e}"
 PG="${DENTACORE_PG:-Host=/tmp;Port=54329;Username=postgres}"
 AMQP="${DENTACORE_AMQP:-amqp://guest:guest@localhost:5672/}"
 GW="${GATEWAY_PORT:-5100}"
+PG_URL_BASE="${DENTACORE_PG_URL:-}"
+# psql URL-i: DB adı ilə. Default soket formatında `?host=...` sorğu hissəsi var, CI formatında yoxdur
+psql_url() { if [[ -n "$PG_URL_BASE" ]]; then echo "$PG_URL_BASE/$1"; else echo "postgresql:///$1?host=/tmp&port=54329&user=postgres"; fi; }
 mkdir -p "$DIR"
 
 secrets() {
@@ -50,14 +55,14 @@ wait_health() { # name port
 case "${1:-}" in
   start)
     secrets
-    psql "postgresql:///postgres?host=/tmp&port=54329&user=postgres" -tc "SELECT 1 FROM pg_database WHERE datname='$DB'" 2>/dev/null | grep -q 1 \
-      || psql "postgresql:///postgres?host=/tmp&port=54329&user=postgres" -qc "CREATE DATABASE $DB"
+    psql "$(psql_url postgres)" -tc "SELECT 1 FROM pg_database WHERE datname='$DB'" 2>/dev/null | grep -q 1 \
+      || psql "$(psql_url postgres)" -qc "CREATE DATABASE $DB"
     for proj in src/Hosts/DentaCore.Identity.Api src/Hosts/DentaCore.ClinicCore.Api src/Hosts/DentaCore.Billing.Api \
                 src/Hosts/DentaCore.Notify.Api src/Hosts/DentaCore.Workers src/Hosts/DentaCore.Gateway tools/DentaCore.DevSeed; do
       ( cd "$ROOT/backend" && dotnet build -v q --nologo "$proj" 2>&1 | grep -E "error|Build FAILED" || true )
     done
     # Sxem versiyalı miqrasiya icraçısı ilə qurulur (db/migrate.sh), DevSeed yalnız başlanğıc məlumatı yazır
-    ( export DATABASE_URL="postgresql:///$DB?host=/tmp&port=54329&user=postgres"; "$ROOT/db/migrate.sh" create-tenant "${SEED_SLUG:-demo}" >/dev/null )
+    ( export DATABASE_URL="$(psql_url "$DB")"; "$ROOT/db/migrate.sh" create-tenant "${SEED_SLUG:-demo}" >/dev/null )
     ( common_env; export DENTACORE_DB="$ConnectionStrings__Default"; cd "$ROOT/backend" && dotnet tools/DentaCore.DevSeed/bin/Debug/net9.0/DentaCore.DevSeed.dll "${SEED_SLUG:-demo}" ${SEED_PASSWORD:+"$SEED_PASSWORD"} | tee "$DIR/seed.txt" )
     PUB="Jwt__PublicKeyPem=$(cat "$DIR/jwt.pub")"
     launch identity DentaCore.Identity.Api 5101 "Jwt__SigningKeyPem=$(cat "$DIR/jwt.key")" "Jwt__PublicKeyPem=$(cat "$DIR/jwt.pub")"

@@ -1,0 +1,134 @@
+{{- range $name, $svc := .Values.services }}
+{{- $fullname := include "dentacore.fullname" $ }}
+{{- $port := int (default 8080 $svc.port) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}-{{ $name }}
+  labels:
+    {{- include "dentacore.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  {{- if not (and $svc.hpa $svc.hpa.enabled) }}
+  replicas: {{ $svc.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels: {{- include "dentacore.selector" (dict "root" $ "component" $name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "dentacore.selector" (dict "root" $ "component" $name) | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+    spec:
+      serviceAccountName: {{ $fullname }}
+      automountServiceAccountToken: false
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ if $svc.runAsWeb }}{{ $.Values.podSecurity.webRunAsUser }}{{ else }}{{ $.Values.podSecurity.runAsUser }}{{ end }}
+        seccompProfile: { type: RuntimeDefault }
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "dentacore.selector" (dict "root" $ "component" $name) | nindent 14 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "dentacore.image" (dict "root" $ "image" $svc.image) | quote }}
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports:
+            - { name: http, containerPort: {{ $port }} }
+          envFrom:
+            {{- if not $svc.runAsWeb }}
+            - configMapRef: { name: {{ $fullname }}-config }
+            {{- end }}
+          env:
+            {{- if $svc.runAsWeb }}
+            - { name: API_ORIGIN, value: {{ printf "http://%s-gateway:8080" $fullname | quote }} }
+            {{- end }}
+            {{- if eq $name "gateway" }}
+            - { name: ReverseProxy__Clusters__identity__Destinations__d1__Address, value: {{ printf "http://%s-identity-api:8080/" $fullname | quote }} }
+            - { name: ReverseProxy__Clusters__clinic-core__Destinations__d1__Address, value: {{ printf "http://%s-clinic-core-api:8080/" $fullname | quote }} }
+            - { name: ReverseProxy__Clusters__billing__Destinations__d1__Address, value: {{ printf "http://%s-billing-api:8080/" $fullname | quote }} }
+            - { name: ReverseProxy__Clusters__notify__Destinations__d1__Address, value: {{ printf "http://%s-notify-api:8080/" $fullname | quote }} }
+            {{- end }}
+            {{- include "dentacore.secretEnv" (dict "root" $ "refs" $svc.secretRefs) | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources: {{- toYaml $svc.resources | nindent 12 }}
+          startupProbe:
+            httpGet: { path: {{ default "/health" $svc.live }}, port: http }
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            httpGet: { path: {{ default "/health" $svc.live }}, port: http }
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet: { path: {{ default "/health/ready" $svc.ready }}, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            {{- if $svc.runAsWeb }}
+            - { name: next-cache, mountPath: /app/apps/web/.next/cache }
+            {{- end }}
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 128Mi } }
+        {{- if $svc.runAsWeb }}
+        - { name: next-cache, emptyDir: { sizeLimit: 256Mi } }
+        {{- end }}
+{{- if not $svc.noService }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullname }}-{{ $name }}
+  labels:
+    {{- include "dentacore.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $name }}
+spec:
+  selector: {{- include "dentacore.selector" (dict "root" $ "component" $name) | nindent 4 }}
+  ports:
+    - { name: http, port: {{ $port }}, targetPort: http }
+{{- end }}
+{{- if and $svc.hpa $svc.hpa.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullname }}-{{ $name }}
+  labels: {{- include "dentacore.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $fullname }}-{{ $name }} }
+  minReplicas: {{ $svc.hpa.min }}
+  maxReplicas: {{ $svc.hpa.max }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ $svc.hpa.cpu }} } }
+{{- end }}
+{{- if gt (int $svc.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullname }}-{{ $name }}
+  labels: {{- include "dentacore.labels" $ | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "dentacore.selector" (dict "root" $ "component" $name) | nindent 6 }}
+{{- end }}
+{{- end }}

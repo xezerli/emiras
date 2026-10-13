@@ -1,0 +1,68 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $fullname := include "dentacore.fullname" . }}
+# Defolt: bütün pod-lara gələn trafik QADAĞANDIR; yalnız aşağıdakı yollar açılır.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-default-deny-ingress
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name | quote }} }
+  policyTypes: [Ingress]
+---
+# Ingress controller → gateway və web
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-allow-ingress-controller
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [gateway, web] }
+      - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ .Values.networkPolicy.ingressControllerNamespace | quote }} }
+---
+# gateway və web → backend servisləri (başqa heç kim: bir pod ələ keçirilsə yan hərəkət məhdudlaşır)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-allow-gateway-to-backends
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [identity-api, clinic-core-api, billing-api, notify-api] }
+      - { key: app.kubernetes.io/instance, operator: In, values: [{{ .Release.Name | quote }}] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: gateway
+              app.kubernetes.io/instance: {{ .Release.Name | quote }}
+---
+# web (BFF) → gateway
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $fullname }}-allow-web-to-gateway
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: gateway
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: web
+              app.kubernetes.io/instance: {{ .Release.Name | quote }}
+{{- end }}

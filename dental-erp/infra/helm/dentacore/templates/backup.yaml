@@ -1,0 +1,91 @@
+{{- if .Values.backup.enabled }}
+{{- $fullname := include "dentacore.fullname" . }}
+{{- $secret := .Values.secrets.existingSecret }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $fullname }}-backups
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.backup.storage.className }}
+  storageClassName: {{ .Values.backup.storage.className }}
+  {{- end }}
+  resources: { requests: { storage: {{ .Values.backup.storage.size }} } }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dentacore-backup               # xəbərdarlıq qaydası (BackupTooOld) bu adla baxır
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext: { runAsNonRoot: true, runAsUser: 999, fsGroup: 999, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: backup
+              image: {{ include "dentacore.image" (dict "root" . "image" .Values.backup.image) | quote }}
+              command: ["/opt/backup/backup.sh"]
+              env:
+                - { name: BACKUP_DIR, value: /backups }
+                - { name: BACKUP_KEEP_DAYS, value: {{ .Values.backup.keepDays | quote }} }
+                {{- if .Values.backup.s3Uri }}
+                - { name: BACKUP_S3_URI, value: {{ .Values.backup.s3Uri | quote }} }
+                {{- end }}
+                - { name: DATABASE_URL, valueFrom: { secretKeyRef: { name: {{ $secret }}, key: postgres-connection } } }
+                - { name: AGE_RECIPIENTS, valueFrom: { secretKeyRef: { name: {{ $secret }}, key: {{ .Values.backup.recipientsSecretKey }} } } }
+              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+              volumeMounts:
+                - { name: backups, mountPath: /backups }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - { name: backups, persistentVolumeClaim: { claimName: {{ $fullname }}-backups } }
+            - { name: tmp, emptyDir: {} }
+{{- if .Values.backup.drill.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dentacore-restore-drill        # RestoreDrillOverdue qaydası bu adla baxır
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.drill.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0                    # uğursuz bərpa sınağı təkrar cəhd olunmur: xəbərdarlıq verir
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext: { runAsNonRoot: true, runAsUser: 999, fsGroup: 999, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: drill
+              image: {{ include "dentacore.image" (dict "root" . "image" .Values.backup.image) | quote }}
+              command: ["/opt/backup/restore-drill.sh"]
+              env:
+                - { name: BACKUP_DIR, value: /backups }
+                - { name: AGE_IDENTITY_FILE, value: /drill/identity }
+                - { name: ADMIN_URL, valueFrom: { secretKeyRef: { name: {{ $secret }}, key: {{ .Values.backup.drill.adminUrlSecretKey }} } } }
+              securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+              volumeMounts:
+                - { name: backups, mountPath: /backups, readOnly: true }
+                - { name: identity, mountPath: /drill, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - { name: backups, persistentVolumeClaim: { claimName: {{ $fullname }}-backups, readOnly: true } }
+            - { name: identity, secret: { secretName: {{ .Values.backup.drill.identitySecret }}, defaultMode: 0400 } }
+            - { name: tmp, emptyDir: {} }
+{{- end }}
+{{- end }}

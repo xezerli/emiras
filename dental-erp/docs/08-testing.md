@@ -1,6 +1,7 @@
 # Mərhələ 8: Testing (Dental Clinic ERP "DentaCore")
 
-> Status: ✅ Tamamlandı. Növbəti: Mərhələ 9 (Deployment: CI/CD, Docker, K8s/Helm, monitorinq).
+> Status: ✅ Tamamlandı. Növbəti: Mərhələ 9 (Deployment: CI/CD, Docker, K8s/Helm, monitorinq): **hazırdır**, bax `09-deployment.md`.
+> Qeyd: bu sənədin rəqəmləri Mərhələ 8-in sonundakı vəziyyətdir. Mərhələ 9 sonra əlavə etdi: backend **674** test (646 keçir, 28 ES tələb edir), +15 `TenantSlugResolver`, +2 Architecture (host konfiqurasiyası), +2 Workers (outbox metrikaları), +2 ClinicCore (health), həmçinin shell/chart/promtool testləri (`09 §3`).
 > Bütün rəqəmlər bu sessiyada real PostgreSQL 16, RabbitMQ 3.12, Redis ilə ölçülüb (Elasticsearch olmadan: bax §7).
 
 ## 1. Prinsiplər

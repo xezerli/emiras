@@ -1,0 +1,246 @@
+name: ci
+
+on:
+  pull_request:
+    paths: ["dental-erp/**", ".github/**"]
+  push:
+    branches: [main]
+    paths: ["dental-erp/**", ".github/**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  # Servis konteynerləri (job-ların hamısı eyni qaydada qoşulur; məlumat bazaları hər job üçün təzədir)
+  PG_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+jobs:
+  contract:
+    name: API kontraktı
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: dental-erp } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { package_json_file: dental-erp/frontend/package.json }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: dental-erp/frontend/pnpm-lock.yaml }
+      - run: npx --yes @redocly/cli@1 lint api/openapi.yaml --config api/redocly.yaml
+      - name: Generasiya olunmuş TypeScript tipləri OpenAPI ilə eynidir
+        working-directory: dental-erp/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm gen:api
+          git diff --exit-code -- packages/api-client/src/schema.d.ts
+
+  backend:
+    name: Backend (unit + inteqrasiya, real servislər)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults: { run: { working-directory: dental-erp/backend } }
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        # Konteynerə port xəritəsi ilə qoşulanda RabbitMQ bağlantını "loopback" saymır və `guest`-i rədd edir; yalnız CI test brokeri üçün söndürülür
+        env: { RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users none" }
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 10s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20
+      elasticsearch:
+        image: elasticsearch:8.11.4
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports: ["9200:9200"]
+        options: >-
+          --health-cmd "curl -fs http://localhost:9200/_cluster/health" --health-interval 10s --health-timeout 5s --health-retries 30
+    env:
+      DENTACORE_TEST_PG: Host=localhost;Port=5432;Username=postgres;Password=postgres;Database=postgres
+      DENTACORE_TEST_AMQP: amqp://guest:guest@localhost:5672/
+      DENTACORE_TEST_REDIS: localhost:6379
+      DENTACORE_TEST_ES: http://localhost:9200
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: dental-erp/backend/global.json }
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('dental-erp/backend/**/*.csproj', 'dental-erp/backend/Directory.Packages.props') }}
+      - run: dotnet build DentaCore.sln -c Release --nologo
+      - name: Testlər (əhatə ilə)
+        run: |
+          dotnet tool install -g dotnet-coverage
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet-coverage collect -s ../tests/coverage/settings.xml -f cobertura -o "$RUNNER_TEMP/backend.cobertura.xml" \
+            "dotnet test DentaCore.sln -c Release --no-build --logger trx --results-directory $RUNNER_TEMP/trx"
+          python3 ../tests/coverage/summarize.py "$RUNNER_TEMP/backend.cobertura.xml" --min-lines 90 | tee "$RUNNER_TEMP/coverage.txt"
+      - name: Atlanmış test olmamalıdır (servislər qalxıb)
+        run: python3 ../tests/ci/assert-no-skips.py "$RUNNER_TEMP/trx"
+      - name: Müvəqqəti əhatə və test nəticələri
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: |
+            ${{ runner.temp }}/trx
+            ${{ runner.temp }}/backend.cobertura.xml
+            ${{ runner.temp }}/coverage.txt
+
+  frontend:
+    name: Frontend (tip, lint, unit, build)
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: dental-erp/frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { package_json_file: dental-erp/frontend/package.json }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: dental-erp/frontend/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm -r lint
+      - run: pnpm test:coverage
+      - run: pnpm --filter @dentacore/web build
+        env: { DISABLE_API_REWRITE: "1" }
+
+  e2e:
+    name: E2E (Playwright, real stack)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+      rabbitmq:
+        image: rabbitmq:3.13-alpine
+        # Konteynerə port xəritəsi ilə qoşulanda RabbitMQ bağlantını "loopback" saymır və `guest`-i rədd edir; yalnız CI test brokeri üçün söndürülür
+        env: { RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit loopback_users none" }
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 10s --health-timeout 5s --health-retries 20
+    env:
+      DENTACORE_PG: Host=localhost;Port=5432;Username=postgres;Password=postgres
+      DENTACORE_PG_URL: postgresql://postgres:postgres@localhost:5432
+      SEED_PASSWORD: Passw0rd!e2e
+      E2E_PASSWORD: Passw0rd!e2e
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: dental-erp/backend/global.json }
+      - uses: pnpm/action-setup@v4
+        with: { package_json_file: dental-erp/frontend/package.json }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm, cache-dependency-path: dental-erp/frontend/pnpm-lock.yaml }
+      - name: Backend yığını
+        run: dental-erp/infra/dev/run-stack.sh start
+      - name: Frontend
+        working-directory: dental-erp/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --filter @dentacore/web e2e:build
+          pnpm --filter @dentacore/web exec playwright install --with-deps chromium
+      - name: E2E
+        working-directory: dental-erp/frontend
+        run: pnpm --filter @dentacore/web e2e
+      - name: Servis log-ları (uğursuzluqda)
+        if: failure()
+        run: tail -n 80 /tmp/dentacore-stack/*.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-traces
+          path: dental-erp/frontend/apps/web/test-results
+
+  database-and-ops:
+    name: Miqrasiya, ehtiyat nüsxə, Helm, Prometheus
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends age postgresql-client-16 || sudo apt-get install -y --no-install-recommends age postgresql-client
+      - name: Miqrasiya icraçısı
+        run: ADMIN_URL="$PG_ADMIN_URL" dental-erp/db/test-migrate.sh
+      - name: Ehtiyat nüsxə və bərpa sınağı
+        run: ADMIN_URL="$PG_ADMIN_URL" dental-erp/infra/backup/test-backup.sh
+      - name: Helm
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/v3.16.4/scripts/get-helm-3 | DESIRED_VERSION=v3.16.4 bash
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          helm lint dental-erp/infra/helm/dentacore
+          python3 dental-erp/infra/helm/test-chart.py kubeconform
+      - name: Prometheus qaydaları və konfiqurasiya
+        run: |
+          docker run --rm -v "$PWD/dental-erp/infra/observability/prometheus:/p:ro" --entrypoint promtool prom/prometheus:v2.55.1 check rules /p/rules/dentacore.yml
+          docker run --rm -v "$PWD/dental-erp/infra/observability/prometheus:/p:ro" -w /p/rules --entrypoint promtool prom/prometheus:v2.55.1 test rules dentacore_test.yml
+          docker run --rm -v "$PWD/dental-erp/infra/observability/otel:/c:ro" otel/opentelemetry-collector-contrib:0.116.1 validate --config /c/collector.yaml
+      - name: Dockerfile lint
+        run: |
+          for f in backend frontend migrate backup; do
+            docker run --rm -i hadolint/hadolint:v2.12.0 hadolint --failure-threshold warning - < "dental-erp/infra/docker/$f.Dockerfile"
+          done
+      - name: compose
+        working-directory: dental-erp/infra/docker
+        run: ./init-secrets.sh && docker compose config -q && docker compose --profile observability config -q
+      - name: Workflow lint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$(go env GOPATH)/bin/actionlint"
+
+  security:
+    name: Təhlükəsizlik (asılılıq, sirr, konfiqurasiya)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: dental-erp/backend/global.json }
+      - uses: pnpm/action-setup@v4
+        with: { package_json_file: dental-erp/frontend/package.json }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: npm audit (produksiya asılılıqları)
+        working-directory: dental-erp/frontend
+        run: pnpm install --frozen-lockfile && pnpm audit --prod
+      - name: NuGet zəifliklər (tranzitiv daxil)
+        working-directory: dental-erp/backend
+        run: |
+          dotnet restore DentaCore.sln
+          dotnet list DentaCore.sln package --vulnerable --include-transitive | tee "$RUNNER_TEMP/vuln.txt"
+          ! grep -q "has the following vulnerable packages" "$RUNNER_TEMP/vuln.txt"
+      - name: Trivy (sirr + IaC konfiqurasiya səhvləri)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: dental-erp
+          scanners: secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          skip-dirs: dental-erp/frontend/node_modules
