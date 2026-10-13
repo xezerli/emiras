@@ -1,0 +1,775 @@
+# Mərhələ 7 — Source Code
+
+> Bu mərhələ böyükdür və dilimlərlə gedir. Hər dilim kompilyasiya olunur, testlərdən keçir və ayrıca commit olunur.
+
+| # | Dilim | Status |
+|---|---|---|
+| 1 | BuildingBlocks + Identity (login, JWT, refresh rotasiyası, tenant həlli, outbox) | ✅ Tamamlandı |
+| 2 | Patient (qeydiyyat, axtarış, tibbi profil) + RBAC scope + hash-chain audit | ✅ Tamamlandı |
+| 3 | Scheduling (qəbul, double-booking, boş slotlar, növbə, no-show, xatırlatma planı) | ✅ Tamamlandı |
+| 4 | Clinical (vizit, odontoqram tarixçəsi, müalicə planı, resept allergiya yoxlaması ilə, imzalanan qeyd) | ✅ Tamamlandı |
+| 5a | Mesajlaşma: Outbox publisher + inbox + consumer host (RabbitMQ), no-show consumer, tenant maintenance | ✅ Tamamlandı |
+| 5b | Billing (qiymət siyahısı, faktura, ödəniş, kassa smeni, refund) + prosedur→qaralama faktura consumer-i | ✅ Tamamlandı |
+| 6 | Notify (SignalR canlı bildirişlər) + Gateway (YARP) | ✅ Tamamlandı |
+| 7a | Audit publisher (outbox) + Dashboard (Redis keşi) | ✅ Tamamlandı |
+| 7b | Sync (offline pull/snapshot/push, konflikt həlli) | ✅ Tamamlandı |
+| 7c | Elasticsearch indexer + axtarış (REAL Elasticsearch 8.11 ilə sınaqdan keçib) | ✅ Tamamlandı |
+| 8a | Frontend əsası: tipli API klienti, Design System, BFF auth, shell, dashboard, realtime | ✅ Tamamlandı |
+| 8b | Pasiyent / təqvim / maliyyə ekranları, DevSeed, `run-stack.sh`, Playwright e2e (real stack) | ✅ Tamamlandı |
+
+---
+
+## Dilim 1: BuildingBlocks və Identity
+
+### Necə işlətmək
+
+```bash
+cd dental-erp/backend
+dotnet build DentaCore.sln                                 # 0 xəta, 0 xəbərdarlıq (xəbərdarlıqlar xəta sayılır)
+dotnet test tests/DentaCore.Identity.UnitTests             # 44 test, DB lazım deyil
+dotnet test tests/DentaCore.Architecture.Tests             # 7 qayda
+
+# İnteqrasiya testləri real PostgreSQL tələb edir (superuser; hər sinif üçün müvəqqəti DB yaradır və silir):
+export DENTACORE_TEST_PG="Host=localhost;Port=5432;Username=postgres;Password=...;Database=postgres"
+dotnet test tests/DentaCore.Identity.IntegrationTests      # 16 test; env yoxdursa Skip olunur
+```
+İnteqrasiya testləri `db/migrations/*.sql` faylını **istehsaldakı kimi** tətbiq edir (trigger, constraint, RLS daxil), sonra `WebApplicationFactory<Program>` ilə Identity.Api-ni real host kimi qaldırır.
+
+### Nə yazıldı
+
+**BuildingBlocks.Domain**: `Entity`, `AggregateRoot` (domen hadisələri + `RowVersion`), `DomainEvent`, `Result<T>`/`Error` (gözlənilən xətalar exception ilə yox, nəticə ilə qaytarılır).
+
+**BuildingBlocks.Application**: CQRS (`ICommand`, `IQuery`, `IRequestHandler`), `ISender` dispatcher və pipeline: `Logging → Validation (FluentValidation) → UnitOfWork`. MediatR **bilərəkdən işlədilmir**: v13-dən kommersiya lisenziyası tələb edir. Əvəzində ~80 sətirlik öz dispatcher-imiz var.
+
+**BuildingBlocks.Infrastructure**:
+- *Outbox:* `DomainEventsToOutboxInterceptor` aggregate-lərin hadisələrini eyni tranzaksiyada `outbox_messages`-ə yazır ("DB yazıldı, mesaj itdi" mümkün deyil).
+- *Tenancy:* `TenantResolutionMiddleware` (domen → slug → `platform.tenants`), hər tenant üçün ayrıca `NpgsqlDataSource` (`search_path=t_xxx,public`), `TenantClaimGuardMiddleware` (JWT `tid` ≠ sorğunun tenant-ı → 403).
+- *Security:* `AesGcmPiiProtector` (AES-256-GCM + HMAC blind index, açar rotasiyası üçün versiya baytı).
+- *Http:* `Result` → RFC 9457 `problem+json` xəritələməsi.
+
+**Identity** (Domain / Application / Infrastructure / Host):
+- `User` aggregate: bloklama siyasəti (5 uğursuz cəhd → 15 dəq), `UserLoggedIn`/`UserLockedOut` hadisələri.
+- `RefreshToken` aggregate: yalnız SHA-256 heş saxlanır, `family_id` ilə rotasiya.
+- Əmrlər: `LoginCommand`, `RefreshTokenCommand`, `LogoutCommand`, sorğu `GetCurrentUserQuery`.
+- Argon2id (OWASP parametrləri, parametrlər heş-in içindədir), RS256 JWT (açar PEM ilə), JwtBearer konfiqurasiyası.
+- Endpoint-lər: `POST /v1/auth/login|refresh|logout`, `GET /v1/auth/me`, `GET /health`, auth üçün IP başına rate limit.
+
+### Təhlükəsizlik qərarları və niyə
+
+| Qərar | Səbəb |
+|---|---|
+| Yanlış parol və mövcud olmayan email eyni 401 + `BurnTime` | Email enumerasiyası və timing hücumu |
+| JWT alqoritmi sabit RS256 (`ValidAlgorithms`) | `alg: none` və HS256/RS256 qarışdırma hücumu. Testlə yoxlanılıb |
+| Refresh token **atomik** istifadə: `UPDATE ... WHERE used_at IS NULL` | Paralel iki sorğudan yalnız biri qalib. Testlə yoxlanılıb (8 paralel sorğu) |
+| İstifadə olunmuş refresh token təkrar gəlsə, bütün family ləğv olunur və hadisə yazılır | Oğurlanmış token aşkarlanması |
+| Tokendə yalnız `permission@scope`, məbləğ limiti yox | Token şişməsin. Limitlər (`max_amount`) tələb olunduqda DB-dən yoxlanılacaq |
+| `X-Tenant` header-i yalnız konfiqurasiya ilə (`AllowTenantHeader`), default söndürülü | İstehsalda tenant yalnız domendən gəlir |
+| Açar yoxdursa host istehsalda **qalxmır** (fail-fast) | Səssiz zəif konfiqurasiya olmasın |
+| Uğursuz giriş sayğacı handler-də açıq `SaveChanges` ilə saxlanır | Pipeline yalnız uğurlu nəticədə saxlayır, bloklama isə uğursuz nəticənin yan təsiridir |
+
+### Testlər (67 test)
+
+| Layer | Say | Nəyi yoxlayır |
+|---|---|---|
+| Unit (Domain, Handler, Security, Pipeline) | 44 | Bloklama və vaxt bitməsi, IP məhdudiyyəti (IPv4-mapped IPv6 daxil), 2FA-da token verilməməsi, refresh rotasiyası və reuse, AES-GCM saxtakarlıq aşkarı, Argon2 səhv formatlar, validasiya pipeline |
+| Integration (real PostgreSQL + real HTTP host) | 16 | Tam login/refresh/logout axını, JWT claim-ləri, outbox atomikliyi, email-in açıq saxlanmaması, cross-tenant bloku, saxta/`alg:none` token, 8 paralel refresh |
+| Architecture | 7 | Qat və modul sərhədləri |
+
+### Test zamanı tapılan və düzəldilən real bug
+
+Unit testlər (fake ilə) keçirdi, real DB testi isə iki problemi tapdı:
+1. Refresh race-ni uduzan sorğu family ləğvini **tranzaksiya daxilində** edirdi, tranzaksiya commit olunmadan bağlandığı üçün ləğv geri qaytarılırdı. İndi tranzaksiya yalnız qalib yolunda yaşayır.
+2. Ləğv olunmuş family-nin hər təkrar cəhdi yeni `RefreshTokenReuseDetected` yazırdı. İndi hadisə yalnız həqiqətən sətir ləğv olunanda yazılır.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **2FA tamamlanmayıb.** 2FA aktiv istifadəçiyə 202 + challenge qaytarılır və token **verilmir** (təhlükəsiz default), amma `POST /auth/2fa/verify` hələ yoxdur (TOTP növbəti Identity dilimində).
+- **İstifadəçi yaratma/dəvət, parol sıfırlama, rol idarəsi** yoxdur (Admin dilimi). İnteqrasiya testləri istifadəçini SQL ilə yaradır.
+- **JWKS endpoint-i** (`/.well-known/jwks.json`) yoxdur: digər servislər hələ public açarı almır. Gateway dilimində əlavə olunacaq.
+- **Forwarded headers / proxy etibarı** konfiqurasiya olunmayıb: rate limit və IP məhdudiyyəti reverse proxy arxasında düzgün IP-ni görməsi üçün Gateway/K8s mərhələsində `KnownProxies` təyin olunmalıdır. Bu olmadan proxy arxasında hamı eyni IP-dən görünər.
+- **Outbox publisher** (RabbitMQ) yoxdur: hadisələr `outbox_messages`-də yığılır (Dilim 6).
+- **Audit yazısı** hələ yoxdur: `audit_log` cədvəli var, yazan modul Dilim 6-dadır.
+- **İnteqrasiya testləri Testcontainers əvəzinə mühit dəyişəni** ilə işləyir (bu mühitdə Docker yoxdur). CI-də (Mərhələ 9) Postgres service container ilə qoşulacaq.
+- Testlər .NET 10 runtime üzərində `DOTNET_ROLL_FORWARD=Major` ilə işləyir (Mərhələ 6 §8).
+- `appsettings` içində sirr yoxdur. Açarlar mühit dəyişəni ilə verilməlidir: `Security__PiiEncryptionKey`, `Security__PiiHashKey` (`openssl rand -base64 32`, fərqli olmalıdırlar), `Jwt__SigningKeyPem` (RSA-2048 PKCS#8), `ConnectionStrings__Default`.
+
+---
+
+## Dilim 2: Patient, RBAC scope və audit zənciri
+
+### Nə yazıldı
+
+**Ümumi infrastruktur (BuildingBlocks):**
+- `CurrentUser`: JWT `perm` (`code@scope`) və `branch` claim-lərindən icazə modeli. `tenant` hamısını, `branch` istifadəçinin filiallarını, `own` yalnız özünün yaratdığını görür. DB-dən və HTTP-dən asılı deyil, tam unit-test olunub.
+- Pipeline genişləndi: `Logging → Authorization → Validation → Audit → UnitOfWork`. Sorğu `IRequiresAccess` daşıyırsa icazə handler-dən əvvəl yoxlanılır, `IAuditable` daşıyırsa uğurlu nəticədən sonra audit zəncirinə yazılır.
+- `Optional<T>`: JSON Merge Patch-də "sahə göndərilməyib" ilə "null göndərilib" fərqi.
+- `412 Precondition Failed` (`If-Match`), `ConcurrencyExceptionMiddleware` (EF konkurrensi toqquşması → 412), `Error.Details` (məs. dublikat pasiyentin id-si).
+- `AddJwtValidation`: Identity-dən başqa host-lar JWT-ni yalnız public açarla (`Jwt__PublicKeyPem`) yoxlayır.
+
+**Audit modulu:** `audit_log` zənciri. Hər qeyd əvvəlkinin heş-ini daşıyır. Heş **DB-də** hesablanır (jsonb/inet saxlanarkən normallaşdığı üçün tətbiqdə hesablanan heş sonradan yoxlananda uyğun gəlməzdi). Yazılar tenant üzrə advisory lock ilə ardıcıllaşdırılır. `IAuditChainVerifier` bütün zənciri yenidən hesablayır və pozulan ilk `id`-ni qaytarır.
+
+**Patient modulu:**
+- `Patient` aggregate (qeydiyyat, merge-patch ilə yeniləmə: "ya hamısı, ya heç nə", soft delete), `PatientAllergy`.
+- Telefon/email/FİN şifrələnir (AES-256-GCM) + blind index. Telefon normallaşdırılır (`+994 50 123-45-67`, `0501234567`, `00994...` eyni heş verir).
+- Əmrlər/sorğular: `RegisterPatient`, `GetPatient`, `SearchPatients`, `UpdatePatient`, `DeletePatient`, `AddAllergy`, `GetMedicalProfile`.
+- Endpoint-lər (`ClinicCore.Api`): `GET/POST /v1/patients`, `GET/PATCH/DELETE /v1/patients/{id}`, `GET /v1/patients/{id}/medical-profile`, `POST /v1/patients/{id}/allergies`.
+- Miqrasiya `T007_patient_permissions.sql`: `patient:read_sensitive` icazəsi.
+
+### Təhlükəsizlik və konfidensiallıq qərarları
+
+| Qərar | Səbəb |
+|---|---|
+| Telefon/email/FİN cavabda **default maskalı** (`+994*******67`). Açıq dəyər `?reveal=true` ilə, ayrıca `patient:read_sensitive` icazəsi ilə və `patient.read.sensitive` kimi audit olunur | Minimum lazımi giriş (HIPAA/GDPR prinsipi) |
+| Scope xaricindəki pasiyent **404** qaytarır (403 yox) | Başqa filialdakı pasiyentin mövcudluğu sızmasın |
+| Dublikat xətasında mövcud pasiyentin id-si yalnız onu görməyə haqqı olana göstərilir | Filiallararası məlumat sızması |
+| Audit-ə PHI yazılmır: axtarış mətni yox, yalnız nəticə sayı; yeniləmədə dəyər yox, yalnız sahə adları | Audit log-un özü PHI anbarına çevrilməsin |
+| İcazəsiz cəhd də auditə yazılır (`permission.denied`) | "Kim nəyə cəhd etdi" izi |
+| Audit yazıla bilmirsə sorğu uğursuz olur (fail-closed) | Audit olunmamış PHI girişi qəbul edilmir |
+| `Cache-Control: no-store` pasiyent cavablarında | PHI brauzer/proxy keşinə düşməsin |
+| Tanınmayan axtarış mətni (`%`, `_`) boş nəticə qaytarır, LIKE joker simvolları literal sayılır | Süzgəcsiz bütün siyahının qaytarılmasının qarşısı |
+| `PATCH` üçün `If-Match` məcburidir (428), köhnə versiya 412 | İtirilmiş yeniləmə (lost update) |
+| Eyni telefon ailə üzvləri üçün normaldır: 409 xəbərdarlıq, `confirmDuplicate=true` ilə keçilir | Real klinika ssenarisi |
+
+### Testlər (166 test, hamısı keçir)
+
+| Layer | Say | Əhatə |
+|---|---|---|
+| Architecture | 7 | Qat və modul sərhədləri |
+| BuildingBlocks unit | 16 | Scope modeli (tenant/branch/own, saxta claim-lər), Authorization və Audit behavior |
+| Identity unit | 44 | (Dilim 1) |
+| Patient unit | 62 | Domen invariantları, telefon normallaşması, maskalama, handler-lər, patch parser, axtarış kriteriyaları |
+| Identity integration | 16 | (Dilim 1), filial claim-i əlavə olunandan sonra yenidən yoxlanıldı |
+| Patient integration | 21 | Real PostgreSQL və real HTTP host: şifrələmə, outbox, audit, filial/own scope, reveal, axtarış (sıra, format, səhifələmə, joker), PATCH konkurrensi (6 paralel yazan), soft delete, allergiya, tenant izolyasiyası, audit zəncirinin pozulması aşkarı |
+
+Patient inteqrasiya testləri 3 dəfə ardıcıl işlədildi, hamısı yaşıl.
+
+### Testlərin tapdığı real bug-lar (düzəldilib)
+
+1. **PATCH cavabı köhnə `rowVersion`/ETag qaytarırdı:** DTO `SaveChanges`-dən əvvəl qurulurdu. İndi əvvəl saxlanır.
+2. **`q=%` bütün pasiyentləri qaytarırdı:** tanınmayan mətn heç bir süzgəc yaratmırdı. İndi boş nəticə.
+3. **Raw SQL alias-ları:** EF-nin snake_case naming convention-ı raw SQL sütun adlarına da tətbiq olunur (`ChartNo` → `chart_no`, `Icd10Code` → `icd10code`). Bu xəta Identity-də də gizlənmişdi (yeni `BranchRow`), inteqrasiya testi tutdu.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **`own` scope yalnız "özünün qeydiyyata aldığı" deməkdir.** Həkimin "öz pasiyentləri" (qəbulu/vizitləri olan) anlayışı Scheduling və Clinical dilimlərində gələcək. Hələlik seed rolunda həkimin `patient:read` icazəsi `own`-dur, yəni qeydiyyatı özü etməyibsə pasiyenti görmür. Dilim 3-4-də "baxan həkim" əlaqəsi əlavə olunacaq.
+- **Axtarış PostgreSQL-dədir** (trigram index + dəqiq heş). Elasticsearch (fuzzy, orfoqrafik səhv) Dilim 7-də. Azərbaycan hərflərinin (Ə, İ/ı) böyük/kiçik hərf fərqsizliyi DB-nin collation-undan asılıdır: istehsal bazası UTF-8 locale (`az_AZ.UTF-8` və ya ICU) ilə yaradılmalıdır. Test bazası default locale ilə işləyir.
+- **`Idempotency-Key` hələ yoxdur** (OpenAPI-də var). Dublikat telefon yoxlaması qismən qoruyur, amma telefonsuz iki eyni sorğu iki pasiyent yaradır.
+- **Anamnez, xəstəlik, dərman yazma endpoint-ləri yoxdur** (yalnız oxuma və allergiya əlavəsi). Sənəd/görüntü yükləmə (S3), razılıq/e-imza, ailə əlaqələri, sığorta, pasiyent birləşdirmə (merge) yoxdur.
+- **`balance` sahəsi** Billing hazır olana qədər qaytarılmır.
+- **Audit partition-ları** yalnız cari və növbəti ay üçün T001 ilə yaranır. Aylıq partition yaradan job (Workers) yazılmayıb, o olmadan ay dəyişəndə audit yazısı uğursuz olar. Bu, Dilim 6-da mütləq bağlanmalıdır.
+- **Audit throughput-u** tenant başına advisory lock ilə ardıcıllaşdırıldığı üçün məhduddur (klinika miqyası üçün kifayət, böyük şəbəkələr üçün ölçülməlidir).
+- **Rate limit və forwarded headers** hələ yalnız Identity-dədir (Gateway dilimində).
+- Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, Testcontainers) qüvvədə qalır.
+
+---
+
+## Dilim 3: Scheduling
+
+### Nə yazıldı
+
+**Domen (`Scheduling.Domain`):**
+- `Appointment` aggregate: `Book`, `Reschedule`, `CheckIn`, `Cancel`, `MarkNoShow` və status maşını. Qaydalar: müddət 5 dəq–8 saat, keçmişdə başlaya bilməz (5 dəq tolerans: gələn pasiyent), 2 ildən uzaq olmaz, check-in başlanğıcdan 2 saat əvvəldən bitməyə qədər, no-show yalnız başlanğıcdan sonra.
+- `TimeSlot`: yarı açıq `[Start, End)`. 10:00–10:30 və 10:30–11:00 üst-üstə düşmür.
+- `SchedulePlanner` (təmiz, I/O-suz): iş qrafiki yoxlaması, boş slot hesablanması, xatırlatma planı. Yerli (Bakı) vaxt ↔ UTC çevrilməsi bir yerdə.
+- `QueueTicket`, `AppointmentReminder`, `WaitlistEntry`.
+
+**Application / Infrastructure:**
+- Əmrlər: `BookAppointment`, `RescheduleAppointment` (merge-patch: yalnız `start` verilsə müddət qorunur, sürüklə-burax üçün), `CancelAppointment`, `MarkNoShow`, `CheckIn`, `CallTicket`, `AddToWaitlist`. Sorğular: `GetAppointment`, `ListAppointments` (aralıq ≤ 62 gün), `GetAvailability`, `GetQueue`.
+- Endpoint-lər (`ClinicCore.Api`): `/v1/appointments` (CRUD, `/availability`, `/check-in`, `/cancel`, `/no-show`), `/v1/queue`, `/v1/queue/{id}/call`, `/v1/waitlist`.
+- **Modul kontraktları:** `Patient.Contracts.IPatientDirectory` (Scheduling pasiyentin adını/filialını bu kontraktla öyrənir) və `Scheduling.Contracts.ICareRelationships` ("baxan həkim"). Modullar bir-birinin daxilini görmür, arxitektura testi bunu yoxlayır.
+- `ConstraintViolationException`: infrastruktur PostgreSQL constraint xətalarını (exclusion, unique, FK) Application qatının başa düşdüyü tipə çevirir.
+
+### Əsas qərarlar
+
+| Qərar | Səbəb |
+|---|---|
+| Double-booking-in **son hakimi DB-dəki `EXCLUDE` constraint-dir**. Tətbiq "əvvəlcə yoxla, sonra yaz" etmir | Yoxla-yaz yarışa açıqdır. 10 paralel sorğu testində tam 1 qəbul yaranır |
+| Overlap-da 409 + **3 alternativ boş slot** (`alternativeSlots`) | UX sənədindəki söz: rədd etmək yox, çıxış yolu göstərmək |
+| İş qrafiki heç təyin olunmayıbsa məhdudiyyət yoxdur | Yeni klinika qrafiki doldurana qədər işləyə bilsin. Qrafik var, həmin gün yoxdursa: iş günü deyil |
+| Check-in bilet nömrəsi **advisory lock** altında verilir | 8 paralel check-in testində 1..8 təkrarsız və boşluqsuz |
+| Ləğv/no-show/yenidən planlama zamanı gözləyən xatırlatmalar eyni tranzaksiyada ləğv olunur | Ləğv olunmuş qəbula SMS getməsin |
+| Xatırlatma planı kanal olaraq pasiyentin `preferredChannel`-ını işlədir, `none` isə heç nə yaratmır | Pasiyentin seçimi |
+| Scope xaricindəki qəbul 404 qaytarır, növbə yalnız filial/tenant scope ilə görünür | Mövcudluq sızmasın. Lobbi növbəsi filial səviyyəsindədir |
+| Audit: `appointment.create/read/list/update/cancel/check_in/no_show`, `queue.read/call`, `waitlist.add`. Ad və səbəb auditə yazılmır | PHI audit-ə sızmasın |
+
+### "Baxan həkim" əlaqəsi (Dilim 2 məhdudiyyətinin həlli)
+
+Həkimin pasiyentlə (ləğv olunmamış) qəbulu varsa, pasiyent onun `own` scope-una daxildir: `GET /patients/{id}`, tibbi profil, allergiya əlavəsi və axtarış. Qəbul ləğv olunanda əlaqə yox olur. Bu, inteqrasiya testində başdan sona yoxlanılır (qəbul yox: 404, qəbul var: 200, ləğv: yenə 404).
+
+### Testlər (253 test, hamısı keçir)
+
+| Layer | Say |
+|---|---|
+| Architecture | 7 |
+| BuildingBlocks unit | 16 |
+| Identity unit / integration | 44 / 16 |
+| Patient unit | 64 |
+| Scheduling unit | 65 |
+| ClinicCore integration (Patient + Scheduling, real PostgreSQL və real HTTP host) | 41 |
+
+Scheduling unit testləri: domen status maşını və pəncərə sərhədləri, slot hesablanması (məşğul/məzuniyyət/keçmiş/bir neçə pəncərə, Bakı UTC+4), xatırlatma planı, handler-lər (scope, konflikt xəritələməsi, alternativlər, tranzaksiya sərhədləri). İnteqrasiya testləri: 10 paralel eyni slot, ardıcıl slotlar, otaq konflikti, iş saatı/məzuniyyət, availability ilə real rezerv uyğunluğu, reschedule + ETag + 412/428, 8 paralel check-in, no-show, list filtrləri və scope, baxan həkim, audit zənciri, tenant izolyasiyası. İnteqrasiya testləri 3 dəfə ardıcıl işlədildi, hamısı yaşıl.
+
+### Testlərin tapdığı real bug-lar (düzəldilib)
+
+1. **Ardıcıl qəbullar üst-üstə düşürdü:** Npgsql-in `NpgsqlRange(lower, upper)` konstruktoru **hər iki sərhədi daxil edir** (`[a,b]`). 10:00–10:30 qəbulundan sonra 10:30–11:00 DB-də konflikt verirdi. Üst sərhəd açıq göstərilir, testdə saxlanan aralığın `[...)` formatı yoxlanılır. Bu xəta kod oxuyarkən görünmürdü, yalnız real DB testi tutdu.
+2. **EF xatırlatmaları qəbuldan əvvəl yazırdı** (FK pozuntusu, 500): reminder ilə appointment arasında əlaqə modeldə bəyan olunmamışdı və EF insert sırasını bilmirdi. FK modeldə bəyan olundu.
+3. **Paralel test sinifləri bir-birinin JWT açarını əzirdi:** host konfiqurasiyası process-global mühit dəyişənləri ilə verilir. İndi bütün host testləri tək collection fixture-da ardıcıl işləyir.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Təkrarlanan qəbul (`recurrenceRule`) yoxdur** (OpenAPI-də qeyd olunub, Faza 2).
+- **Xatırlatmalar yalnız planlanır** (`appointment_reminders`), göndərən worker və SMS/WhatsApp provayderləri yoxdur (Dilim 6 və Communication modulu).
+- **Wait list yalnız əlavə olunur.** Ləğv olunan slot üçün avtomatik təklif və siyahıya baxış yoxdur.
+- **no_show_count / risk skoru yenilənmir:** `AppointmentMissed` hadisəsi outbox-a düşür, amma onu Patient modulunda işləyən consumer (RabbitMQ publisher, Dilim 6) hələ yoxdur.
+- **Provayder yoxlaması yalnız mövcudluqdur** (FK). Provayderin həkim rolunda olması, aktiv olması yoxlanılmır (Identity Contracts ilə gələcək).
+- **İş qrafiki yalnız oxunur:** `provider_schedules` və `time_off` üçün idarəetmə endpoint-ləri (HR/Admin dilimi) yoxdur, testlər onları SQL ilə yaradır.
+- **Otaq və filial məlumatı** (`rooms`) üçün ayrıca Organization modulu hələ yoxdur: Scheduling bu cədvəli oxu modeli ilə birbaşa sorğulayır.
+- **`Scheduling:TimeZone`** klinika üçün tək IANA qurşağıdır (default `Asia/Baku`). Filial üzrə fərqli qurşaq dəstəklənmir. Tenant-ın `timezone` sahəsi ilə avtomatik uyğunlaşdırma yoxdur.
+- **Real-time yeniləmə (SignalR) və Google/Outlook sinxronu yoxdur.** Təqvim indi yalnız sorğu ilə yenilənir.
+- **`start`/`complete` statusları** Clinical dilimində vizitlə birgə gələcək.
+- Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, audit partition job-u, Idempotency-Key, Testcontainers) qüvvədə qalır.
+
+---
+
+## Dilim 4: Clinical
+
+### Nə yazıldı
+
+**Domen (`Clinical.Domain`):**
+- `Visit`: açıq/bağlı, `VisitStarted` və `VisitClosed` hadisələri.
+- `ToothRecord` (odontoqram): FDI validasiyası (11–48, 51–85), səth, vəziyyət. Yeni qeyd köhnəni əvəz edir (`superseded_at`), heç nə silinmir.
+- `TreatmentPlan` + `PlanItem`: `draft → proposed → accepted → in_progress → completed`, həmçinin `rejected`/`cancelled`. Sətir cəmi: say × qiymət × (1 − endirim%), bank yuvarlaqlaşdırması.
+- `Prescription` (dəyişməz) və `AllergyChecker`.
+- `ClinicalNote` (SOAP): qaralama → imza → dəyişməz, düzəliş addendum ilə.
+
+**Endpoint-lər (`ClinicCore.Api`):** `/v1/visits` (+`/close`), `/v1/patients/{id}/odontogram` (GET, POST, `/{fdi}/history`, `?at=` ilə time travel), `/v1/patients/{id}/treatment-plans`, `/v1/treatment-plans/{id}` (+`/propose|accept|reject|cancel`, `/items/{id}/perform`), `/v1/clinical-notes` (+`PUT`, `/sign`), `/v1/prescriptions`, `/v1/procedure-codes`, plus pasiyent üzrə siyahılar.
+
+**Miqrasiya `T008_clinical.sql`:** 18 prosedur kodlu kataloq, `prescriptions.override_reason`, DB qaydaları (aşağıda), plan bəndlərinə `row_version`.
+
+**Başqa modullarla əlaqə (yalnız kontraktlarla):**
+- `Scheduling.Contracts.IAppointmentLifecycle`: vizit başlayanda qəbul `in_progress`, bağlananda `completed` olur. Qəbul həmin pasiyentə və həkimə aid olmalıdır.
+- `Patient.Contracts.IPatientDirectory.GetActiveAllergiesAsync`: resept yoxlaması üçün.
+- Həkimin `own` scope-u "baxan həkim" əlaqəsi ilə həll olunur (Dilim 3).
+
+### Əsas qərarlar
+
+| Qərar | Səbəb |
+|---|---|
+| **Allergiya yoxlaması serverdədir.** Konflikt 422 `prescription.allergy_conflict` və konflikt siyahısı qaytarır. Keçmək üçün `overrideAllergyWarning=true` və ≥ 10 simvollu səbəb lazımdır, nəticə `prescription.allergy_override` kimi audit olunur | UI-ı keçib API-yə birbaşa yazmaq xəbərdarlığı atlamasın |
+| Resept dəyişməzdir, `allergy_check_passed = false` olarsa səbəb DB `CHECK` ilə məcburidir | Səbəbsiz override mümkün deyil, hətta birbaşa SQL ilə də |
+| Eyni diş+səth üçün yalnız **bir aktual qeyd** (DB unikal indeksi `ux_tooth_current_surface`). Bütün dişi (səthsiz) qeyd etmək səthlərin hamısını əvəz edir. Qeyd pasiyent üzrə advisory kilid altında tranzaksiyada yazılır | Paralel iki həkim eyni dişi dəyişəndə iki "aktual" qeyd qalmasın |
+| Bir həkim–pasiyent üçün yalnız **bir açıq vizit** (`ux_visits_one_open`) | Yarışa qarşı DB qoruması, 409 cavabı mövcud vizitin id-sini qaytarır |
+| Plan bəndi üçün **optimistic concurrency** (`row_version`). Prosedur yalnız həkimin öz açıq vizitində icra olunur | Eyni bəndi iki dəfə "icra olundu" etmək ikiqat faktura deməkdir |
+| `ProcedurePerformed` hadisəsi **qiyməti, endirimi və sayı daşıyır** | Billing icra anındakı qiymətlə faktura yazır, plan sonradan dəyişsə də |
+| Qaralama qeydlər yalnız müəllifə görünür və yalnız o dəyişə/imzalaya bilər. İmzadan sonra həm domen, həm DB trigger-i dəyişməyə icazə vermir | Klinik-hüquqi tələb: imzalanmış qeyd sübutdur |
+| Audit-ə dərman adı, qeyd mətni və diş şərhi yazılmır, yalnız fakt və sayı | Audit log PHI anbarına çevrilməsin |
+| Bütün klinik məlumat `Cache-Control: no-store` (odontoqram, reseptlər) | PHI brauzer/proxy keşinə düşməsin |
+| Plan yalnız qaralamada redaktə olunur (`version` hələlik həmişə 1) | Təklif olunmuş planın sənəd kimi dəyişməməsi. Dəyişiklik yeni plan kimi yaradılır |
+
+### Testlər (365 test, hamısı keçir)
+
+| Layer | Say |
+|---|---|
+| Architecture | 7 |
+| BuildingBlocks unit | 16 |
+| Identity unit / integration | 44 / 16 |
+| Patient unit | 64 |
+| Scheduling unit | 67 |
+| Clinical unit | 90 |
+| ClinicCore integration (Patient + Scheduling + Clinical, real PostgreSQL və real HTTP host) | 61 |
+
+Clinical inteqrasiya testləri (20): qəbuldan vizit və status keçidləri, 6 paralel "vizitə başla" (tam 1), səth üzrə əvəzlənmə və tarixçə, time travel, 6 paralel eyni dişə qeyd (tam 1 aktual), plan cəmləri və tam həyat dövrü və Billing-ə hazır hadisə yükü, 6 paralel eyni bəndin icrası (tam 1 faktura hadisəsi), ləğv olunmuş planda icra olunmuş bəndlərin qalması, allergiya konflikti/override/audit, DB `CHECK`, qaralama/imza/addendum və DB trigger-i, həkim `own` scope-u və baxan həkim əlaqəsi, tenant izolyasiyası, audit zənciri.
+
+**Testlərin dişi olduğunu yoxladım (mutasiya):** bənd üçün optimistic concurrency-ni, sonra odontoqram advisory kilidini qəsdən söndürdüm. Hər dəfə uyğun paralel test qırmızı oldu, bərpadan sonra yenə yaşıl.
+
+### Testlərin tapdığı real bug-lar (düzəldilib)
+
+1. **Allergiya yoxlaması böyük "İ" ilə yayınırdı.** `AMOKSİSİLLİN` (nöqtəli İ) `ToLowerInvariant` ilə `i̇` (i + birləşən nöqtə) olur və `penisillin` allergiyası ilə uyğun gəlmirdi. Azərbaycan/türk klinikaları üçün real təhlükə. İndi diakritiklər Unicode FormD ilə silinir.
+2. Test zamanı mənasız bir assertion də tapılıb düzəldildi (testin özündə səhv).
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Allergiya yoxlaması sadə ad və kiçik dərman sinfi lüğətidir** (penisillin, sefalosporin, NSAID, lokal anesteziklər, lateks, makrolid və s.). Tam dərman məlumat bazası DEYİL, qarşılıqlı təsir (interaction) yoxlaması yoxdur. Bu klinik qərar dəstəyi vasitəsidir, həkimin mühakiməsini əvəz etmir. Faza 3-də dərman bazası və AI ilə genişlənəcək.
+- **Perio chart, implant və ortodontik planlama, şəkil annotasiyası, before/after yoxdur** (spesifikasiyadakı Doctor modulunun bir hissəsi). Cədvəl (`perio_charts`) hazırdır, endpoint-lər yoxdur.
+- **Voice-to-text və AI qaralama yoxdur.** `source=voice|ai_draft` yalnız saxlanılır, AI funksiyası Faza 3-dədir.
+- **Plan bəndinin qiyməti əl ilə daxil edilir.** Billing modulunun qiymət siyahısı (`services`) ilə uyğunlaşma Dilim 5-də. Plan "estimate" faktura yaratmır (qəbul zamanı yalnız hadisə yazılır).
+- **Plan redaktəsi yoxdur** (yalnız yarat, təklif et, qəbul/rədd, ləğv, icra). Qaralama bəndlərini dəyişmək üçün endpoint əlavə olunmalıdır.
+- **Qəbul statusu vizitlə iki ayrı tranzaksiyadadır** (iki modulun iki DbContext-i). Vizit saxlanandan sonra qəbul `completed` edilir və uğursuz olarsa vizit yenə də bağlı sayılır. Tam atomiklik RabbitMQ saga-sı (Dilim 6) ilə gələcək.
+- **Prosedur icrası odontoqramı avtomatik yeniləmir** (məs. plomb icrasından sonra dişin vəziyyəti). Həkim ayrıca qeyd edir.
+- **Prosedurun materialları (stok)** hələ yoxdur, Inventory modulu Faza 2-dədir.
+- Əvvəlki dilimlərin məhdudiyyətləri (2FA, JWKS, outbox publisher, audit partition job-u, Idempotency-Key, Testcontainers) qüvvədə qalır.
+
+> Növbəti dilim: **Dilim 5a** (aşağıda, RabbitMQ), sonra **Billing**.
+
+---
+
+## Dilim 5a: Mesajlaşma (RabbitMQ publisher, inbox, consumer)
+
+### Nə yazıldı
+
+| Hissə | Fayl (`BuildingBlocks.Infrastructure/Messaging`) | Rolu |
+|---|---|---|
+| Zərf və müqavilələr | `Messaging.cs` | `IntegrationEnvelope` (id, type, version, tenantId, tenantSlug, routingKey, payload), `[Consumes]`, `IIntegrationConsumer`, `RabbitMqOptions` |
+| Publisher | `RabbitMqPublisher.cs` | Bir kanal, publisher confirms, kəsilmədə təkrar qoşulma, persistent mesaj, `MessageId = outbox id` |
+| Outbox processor | `OutboxProcessor.cs` | Hər tenant üçün `FOR UPDATE SKIP LOCKED` ilə paket götürür, göndərir, `processed_at` yazır; xətada `attempts+1` və exponential `next_attempt_at` (5 san · 2^cəhd, max 1 saat) |
+| Inbox | `Inbox.cs` | `ExecuteOnceAsync`: inbox sətri + consumer təsiri EYNİ tranzaksiyada |
+| Consumer host | `ConsumerHost.cs` | Topologiya (topic exchange `dental.events`, `dental.dead`, növbə `<prefix>.<ad>` + `.dlq`), prefetch, yerli təkrar cəhdlər, sonra DLQ |
+| Maintenance | `Maintenance.cs` | Saatlıq: audit partition-ları (cari + 2 ay), işlənmiş outbox (7 gün), köhnə refresh token və change_log təmizliyi |
+| Miqrasiya | `db/migrations/tenant/T009_outbox_retry.sql` | `outbox_messages.next_attempt_at` + indekslər |
+| İlk consumer | `Patient.Infrastructure/NoShowConsumer.cs` | `scheduling.appointment-missed` → `patients.no_show_count + 1` (atomik SQL) |
+| Müqavilə | `Scheduling.Contracts/IntegrationEvents.cs` | `AppointmentMissedV1`: Patient modulu Scheduling.Domain-ə istinad etmir |
+| Host | `DentaCore.Workers/Program.cs` | Patient modulu, messaging, consumer-lər, publisher, maintenance |
+
+### Əsas qərarlar
+
+- **At-least-once + inbox = effektiv bir dəfə.** Broker və outbox təkrar çatdıra bilər; inbox `(message_id, consumer)` PK-sı dublikatı atır. Inbox və təsir bir tranzaksiyadadır: proses ortada ölərsə hər ikisi geri qaytarılır.
+- **Göndərmə outbox tranzaksiyası daxilindədir.** Commit-dən əvvəl proses ölərsə mesaj təkrar göndərilir (dublikat, itki yox). Əksinə sıra (əvvəl commit, sonra göndər) mesajı itirərdi.
+- **`SKIP LOCKED`** bir neçə Workers nüsxəsinin eyni sətri iki dəfə götürməməsini təmin edir və horizontal miqyaslanmanı açır.
+- **Routing key tenant-sızdır, tenant zərfdədir.** Bir növbə bütün tenant-lara xidmət edir (10 000 tenant üçün 10 000 növbə olmur). Consumer tenant-ı `platform.tenants`-dan slug ilə tapır və scope-u həmin tenant-a bağlayır.
+- **Topologiyanı consumer host `StartAsync`-də elan edir və publisher-dən ƏVVƏL qalxır.** Subscriber-i olmayan routing key-ə göndərilən mesaj broker-də itir; növbə əvvəlcədən bağlı olmalıdır. Hosted servislər ardıcıl başlayır və `StartAsync` bitmədən növbəti başlamır. (İlk variantda topologiya `ExecuteAsync`-də qurulurdu, yəni publisher ilə yarışırdı: Dilim 5b testləri bunu üzə çıxardı, aşağıya baxın.)
+- **Zəhərli mesajlar itmir.** Oxunmayan JSON dərhal, tənzimlənən sayda uğursuz cəhddən sonra isə işlənə bilməyən mesaj DLQ-ya düşür (`dental.dead`), orada araşdırılır.
+- **No-show artırması atomik SQL-dir** (`no_show_count = no_show_count + 1`), oxu-dəyiş-yaz deyil: pasiyent kartının paralel redaktəsi ilə konkurensiya istisnası yaranmır. `NoShowCount` EF mapping-indən `ValueGeneratedOnAdd` çıxarıldı ki, domen dəyəri DB default-u ilə qarışmasın.
+- **Müqavilə testi:** Scheduling domen hadisəsinin real JSON-u `AppointmentMissedV1`-ə oxunur; sahə adı dəyişərsə test qırılır.
+
+### Testlər (373 test, hamısı keçir; Dilim 5b sonrası 14 Workers testi)
+
+Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real RabbitMQ** ilə işləyir (`DENTACORE_TEST_PG` və `DENTACORE_TEST_AMQP` təyin olunmayıbsa atlanır). Hər işə salma unikal exchange/növbə prefiksi alır və sonda təmizləyir.
+
+| Test | Nəyi sübut edir |
+|---|---|
+| Outbox → broker | Zərfin bütün sahələri (id, type, tenant, routing key, payload), `MessageId`, persistent; `processed_at` yazılır |
+| Uğursuz göndərmə | `attempts`, `last_error`, `next_attempt_at` gələcəkdə; backoff müddətində cəhd yoxdur; vaxt çatanda göndərilir və xəta təmizlənir |
+| Max cəhd | Limitə çatmış sətir toxunulmaz qalır |
+| Paralel processor-lar | 30 mesaj, iki processor: hər mesaj tam bir dəfə, hər iki processor iş görür |
+| No-show consumer | Outbox-dan gələn mesaj sayı 1 edir; eyni mesaj broker-də iki dəfə təkrar çatdırılanda say artmır; fərqli mesaj sayılır |
+| DLQ | JSON olmayan mesaj və tanınmayan tenant-lı mesaj `patient.no-show.dlq`-ya düşür |
+| Müqavilə uyğunluğu | Domen hadisəsi JSON-u `AppointmentMissedV1`-ə düzgün oxunur |
+| Maintenance | Audit partition-ları 2 ay irəli yaranır və təkrar işə salma idempotentdir |
+
+**Mutasiya yoxlaması:** `NoShowConsumer`-dən inbox çıxarılanda duplicate testi qırılır (say 2-dən çox olur); kod bərpa olundu.
+
+### Testin tapdığı səhv (test tərəfində)
+
+- Partition yoxlaması `pg_class` ilə tenant sxemlərini qarışdırırdı (`t_demo` və `t_other` eyni ad). `to_regclass` ilə (search_path-ə uyğun) əvəz olundu.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Yalnız bir consumer var** (no-show). Billing, Notify, Search indexer növbəti dilimlərdə eyni mexanizmi istifadə edəcək.
+- **Risk skoru (AI) yenilənmir**, yalnız `no_show_count`.
+- **Broker əlçatmaz olarkən Workers açılışı** consumer host-da istisna atır və host dayanır (orkestrator yenidən başladır). Daha yumşaq yenidən qoşulma gələcək işdir. Publisher isə mesajı outbox-da saxlayıb təkrar cəhd edir.
+- **Maksimum cəhdi aşmış outbox sətirləri** avtomatik xəbərdarlıq yaratmır; monitorinq qaydası (Mərhələ 9, Prometheus) lazımdır.
+- **Outbox sorğusu hər tenant üçün ardıcıl işləyir.** Minlərlə tenant üçün tenant-ları paralelləşdirmək və ya LISTEN/NOTIFY ilə oyatmaq optimallaşdırmasıdır.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Idempotency-Key, Testcontainers) qüvvədə qalır; **audit partition job-u və no-show consumer məhdudiyyətləri bu dilimlə bağlandı.**
+
+> Dilim 5b-də tapılan və düzəldilən 5a xətası: **başlanğıc yarışı**. Consumer host topologiyanı `ExecuteAsync`-də (arxa fonda) qururdu, outbox publisher isə dərhal başlayırdı; yeni növbə hələ bağlanmamış exchange-ə göndərilən ilk mesaj broker-də itirdi və outbox onu "göndərilib" saymışdı. 5a-nın tək consumer-i yarışı təsadüfən qazanırdı. Düzəliş: topologiya `StartAsync`-də qurulur; regression testi (`Queues_are_declared_before_the_host_finishes_starting...`) host başlayan kimi növbələrin və dinləyicilərin mövcudluğunu yoxlayır.
+
+---
+
+## Dilim 5b: Billing
+
+### Nə yazıldı
+
+| Qat | Məzmun |
+|---|---|
+| Domen | `Invoice` (aggregate: sətirlər, yekunlar, issue/void, ödəniş, geri qaytarma, hadisələr), `InvoiceItem`, `Payment` (append-only), `CashShift`, `Service` (qiymət siyahısı), `Money` |
+| Tətbiq | Qiymət siyahısı (siyahı, yarat, yenilə), faktura (yarat, oxu, siyahı, issue, void), ödəniş qəbulu, geri qaytarma, kassa smeni (aç, bağla, cari), `BillingAccess`, `IRefundLimits` |
+| İnfrastruktur | `BillingDbContext`, `BillingRepository` (FOR UPDATE/SHARE kilidləri), `RefundLimits` (rolun `max_amount`), `ProcedurePerformedConsumer` |
+| Host | `DentaCore.Billing.Api` (14 endpoint, `Idempotency-Key`, `If-Match`), Workers-də Billing consumer-i |
+| Miqrasiya | `T010_billing.sql`: DB səviyyəsində pul qaydaları (aşağıda) |
+| Müqavilə | `Clinical.Contracts.ProcedurePerformedV1` |
+
+### Pul qaydaları (domenə və DB-yə eyni anda yazılıb)
+
+- **Məbləğ ən çox 2 onluq mərtəbədir**; DB `numeric(14,2)` səssiz yuvarlaqlaşdırmasın deyə domen rədd edir.
+- **Qiymətlər vergisizdir**: vergi = (sətir − endirim) × stavka, hər sətir üzrə yuvarlaqlaşdırılır (yarısı sıfırdan uzağa); yekun = cəm − endirim + vergi.
+- **Qaralamada sətir əlavə olunur, issue-dan sonra sətirlər dəyişməzdir** (domen + `trg_invoice_items_draft_only` trigger-i: birbaşa SQL də rədd olunur).
+- **Ödəniş qalıq borcu aşa bilməz** (`billing.overpayment`, cavabda cari qalıq) və DB-də `ck_invoices_no_overpay`.
+- **Ödəniş sətirləri dəyişməzdir** (T006 trigger-i). Düzəliş = əks əməliyyat: `kind='refund'` + `refund_of` (`ck_payments_refund_link`).
+- **Geri qaytarma ödənilmiş məbləği azaldır və borcu bərpa edir** (tam geri qaytarmadan sonra status yenə `issued`). Xidmət ləğv olunursa: əvvəl geri qaytar, sonra `void`. Statusu `refunded` hələlik istifadə olunmur.
+- **Limit** rolun `role_permissions.max_amount` dəyərindən oxunur (NULL = limitsiz, 0 = hər məbləğ üçün rəhbər lazımdır), bir sorğu üzrə yoxlanılır. Aşılanda 403 `billing.refund_limit_exceeded` və `limit` cavabdadır.
+- **Bir ödənişdən geri qaytarıla bilən = ödəniş − əvvəlki geri qaytarmalar** (`billing.refund_exceeds_payment`, cavabda `refundable`).
+- **Hər vizit üçün ən çox bir qaralama faktura** (`ux_invoices_one_draft_per_visit`) və **bir plan bəndi iki dəfə fakturalanmır** (`ux_invoice_items_plan_item`).
+
+### Konkurensiya və idempotentlik
+
+- **Ödəniş, geri qaytarma, void**: tranzaksiya açılır, faktura sətri `SELECT … FOR UPDATE` ilə kilidlənir, sonra yenidən yüklənir. Kilid olmadan paralel iki ödəniş eyni köhnə qalığı görür (mutasiya testi sübut etdi). Qalıq/kilid üçün yoxlama izlənməyən (`AsNoTracking`) nüsxə ilə edilir ki, kilid gözləyəndən sonra köhnəlmiş izlənən obyekt işlənməsin.
+- **Kassa smeni**: nağd ödəniş smen sətrini `FOR SHARE`, bağlama `FOR UPDATE` ilə kilidləyir. Bağlama ilə paralel nağd ödənişdə ya ödəniş smenə düşür və gözlənilən cəmə daxildir, ya smen bağlı olduğu üçün rədd olunur; itən pul olmur.
+- **`Idempotency-Key` ödəniş və geri qaytarmada məcburidir** (başlıq yoxdursa 400). Eyni açar + eyni sorğu = eyni nəticə (ikinci pul çıxmır); eyni açar + fərqli sorğu = 409. Eyni açarla paralel sorğular `payments.idempotency_key UNIQUE` ilə ardıcıllaşır: itirən tərəf qalibin nəticəsini qaytarır.
+- **Nağd ödəniş açıq smen tələb edir** (eyni filialda); kart/köçürmə tələb etmir və smen filialı fərqlidirsə kassaya yazılmır.
+
+### Prosedur → qaralama faktura
+
+`clinical.procedure-performed` hadisəsi vizitin qaralama fakturasına sətir əlavə edir (yoxdursa yaradır). Qiymət və endirim **icra anındakı plan bəndindən**, ƏDV və xidmət bağı `services.procedure_code` ilə qiymət siyahısından, ad isə xidmətin adından (yoxdursa prosedur adından) gəlir. Faktura avtomatik **issue olunmur**: bu insan qərarıdır (reception yoxlayıb təsdiqləyir). Faktura artıq issue olunubsa yeni hadisə yeni qaralama açır. Pasiyent tapılmasa mesaj təkrar cəhdlərdən sonra DLQ-ya düşür.
+
+### Testlər (461 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Billing.UnitTests` | 46 | Yekunlar və vergi yuvarlaqlaşdırması, validasiya sərhədləri, status maşını, ödəniş/geri qaytarma/void qaydaları, smen fərqi, qiymət siyahısı validasiyası |
+| `Billing.IntegrationTests` | 36 | Real PostgreSQL üzərində API: qiymət siyahısı + `If-Match`, qiymətlərin siyahıdan götürülməsi, issue-dan sonra dondurma (trigger), filial/tenant/own scope, cursor ilə səhifələmə (boşluq və təkrar yoxdur), overdue, kassa, limitli rollar, idempotentlik, audit zənciri bütövlüyü, DB-nin tətbiqi yan keçən SQL-ə qarşı müdafiəsi |
+| `Workers.IntegrationTests` (+5) | 14 | Prosedur → bir qaralama faktura (qiymət, endirim, ƏDV, xidmət bağı), təkrar çatdırılma ikiqat fakturalamır, issue-dan sonra yeni qaralama, olmayan pasiyent DLQ-da, hadisə JSON-unun müqavilə ilə uyğunluğu, başlanğıc sırası |
+
+**Konkurensiya testləri** (hamısı real paralel HTTP sorğuları): 10 paralel 60-lıq ödənişdən 100-lük fakturaya **tam biri** keçir; 5 paralel 20-lik ödəniş itkisiz 100 edir; eyni açarla 6 paralel sorğu **bir** ödəniş yaradır; ödəniş ilə void yarışında nəticə həmişə ya "ləğv, 0 pul", ya "50 ödənilib"; 8 paralel 30-luq geri qaytarmadan **tam 3-ü** keçir; smen bağlanarkən gələn nağd ödənişlər gözlənilən cəmlə uyğun qalır.
+
+**Mutasiya yoxlamaları** (kod bərpa olundu): faktura `FOR UPDATE` kilidi çıxarılanda üç konkurensiya testi qırılır; smen kilidi `FOR UPDATE`-dən `FOR SHARE`-ə endiriləndə smen-bağlama testi 3/3 qırılır.
+
+### Testlərin tapdığı real xətalar (düzəldilib)
+
+- **Başlanğıc yarışı** (yuxarıda): topologiya publisher ilə yarışırdı.
+- **Raw SQL alias-ları**: `SqlQuery<T>` rekord sahələrini `snake_case` sütunlarla uyğunlaşdırır (`service_id`, `vat_rate`); PascalCase alias consumer-i sındırırdı (Patient dilimindəki eyni dərs).
+- **Test hesabı**: ƏDV endirimdən sonrakı məbləğdən hesablanır; gözlənilən yekun düzəldildi.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Faktura nömrəsi PostgreSQL sequence-dir** (`INV-YYYY-000001`): ləğv olunmuş tranzaksiyalarda boşluq yaranır və nömrə qaralamada təyin olunur (issue-da yox). Boşluqsuz rəsmi nömrələmə tələb edən ölkələr üçün issue anında ayrıca nömrələmə cədvəli lazımdır.
+- **Qiymətlər vergisizdir** və qiymət siyahısında valyuta çevirməsi yoxdur: faktura tək valyutalıdır (qarışıq valyuta 422). Vergi-daxil qiymət rejimi və e-qaimə inteqrasiyası ayrıca iş.
+- **Promo kod, sığorta, taksit, hədiyyə kartı və depozit (prepayment) hələ yoxdur** (sxemdə hazırdır). Bu üsullar 422 qaytarır. Promo/sığorta sahələri göndərilərsə də 422.
+- **`POST /invoices` üçün `Idempotency-Key` hələ tətbiq olunmayıb** (OpenAPI-də var). Pul hərəkətləri (ödəniş, geri qaytarma) qorunur; faktura yaratmanın təkrarı ikinci qaralama yaradır. Vizit üçün isə unikal indeks ikinci qaralamanı rədd edir.
+- **PDF endpoint-i yoxdur** (Faza 2).
+- **Geri qaytarma limiti sorğu başınadır**, günlük/kumulyativ limit yoxdur.
+- **Smen bağlayan başqasının smenini yalnız `payment:write@tenant` ilə bağlaya bilər**; smen transferi və kassa orderi (giriş/çıxış) yoxdur.
+- **`VisitClosed` hadisəsi Billing tərəfindən istifadə olunmur**: qaralama prosedur hadisələri ilə yaranır. Vizit bağlananda avtomatik xatırlatma (faktura issue olunmayıb) Notify dilimində olacaq.
+- **Hesabatlar, gəlir/borc dashboard-u və Accounting jurnalı** hələ yoxdur; `billing.payment-received` və digər hadisələr outbox-a düşür, dinləyən yoxdur.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Testcontainers, SignalR, Elasticsearch) qüvvədə qalır.
+
+---
+
+## Dilim 6: Notify (SignalR) və Gateway (YARP)
+
+### Nə yazıldı
+
+| Hissə | Məzmun |
+|---|---|
+| `Modules/Notify/Application` | `NotificationRouter` (hadisə → bildiriş + hədəf qruplar), `GroupMembership` (token → qruplar), `GroupNames`: təmiz məntiq, broker və SignalR-dan asılı deyil |
+| `Modules/Notify/Infrastructure` | `NotificationHub` (`/hubs/notifications`), `RealtimeConsumer` (RabbitMQ → SignalR), DI |
+| `Hosts/DentaCore.Notify.Api` | JWT (WebSocket üçün `?access_token=`), hub, `CloseOnAuthenticationExpiration` |
+| `Hosts/DentaCore.Gateway` | YARP: marşrutlar, orijinal Host, X-Forwarded-* siyasəti, rate limit, korrelyasiya id-si, təhlükəsizlik başlıqları, `/health/downstream` |
+| `BuildingBlocks` | **Broadcast consumer** (`[Consumes(..., Broadcast = true)]`), `AddIntegrationConsumerHost`, `Jwt:AccessTokenQueryPaths` |
+| `Scheduling.Domain` | `AppointmentRescheduled/Cancelled/Missed` hadisələrinə `BranchId` əlavə olundu (filial üzrə marşrutlaşdırma üçün; geriyə uyğundur, müqavilə `AppointmentMissedV1` dəyişmədi) |
+
+### Canlı bildirişlər: təhlükəsizlik modeli
+
+- **Bildiriş məzmun daşımır**: yalnız `event`, `entityId`, `patientId`, `branchId`, `at`. Məbləğ, ad, diaqnoz yoxdur. Klient dəyişikliyi bilib məlumatı öz səlahiyyəti ilə API-dən oxuyur, ona görə canlı kanal məlumat sızdıra bilməz (test: ödəniş bildirişində `987.65`, ad və üsul simvolları yoxdur, sahələr dəqiq 5-dir).
+- **Qrup üzvlüyü bağlantı anında token claim-lərindən hesablanır** (`tid`, `perm`, `branch`), klient qrup seçə bilmir. Üç sahə: `appointments` (`appointment:read`), `billing` (`invoice:read`), `clinical` (`clinical:read`). Scope: `tenant` hamısı, `branch` yalnız öz filialları (`*` = tenant qrupu), `own` yalnız provayder olduğu hadisələr.
+- **Tenant hər qrup adındadır** (`t:<tenantId>:<sahə>[:b:<filial>|:u:<istifadəçi>]`). Başqa tenant-ın tokeni `X-Tenant`/subdomain ilə uyğun gəlmirsə `TenantClaimGuard` bağlantını rədd edir.
+- **Token bitəndə server bağlantını bağlayır** (`CloseOnAuthenticationExpiration`); klient yeni token ilə qoşulur. İcazə dəyişikliyi yeni bağlantıda qüvvəyə minir.
+- **WebSocket token-i query string-dədir** (brauzer başlıq göndərə bilmir), yalnız `/hubs` yolunda. Query string proxy log-larına düşə bilər: **log-larda query saxlanmamalıdır** (Mərhələ 9 yoxlama siyahısına əlavə olundu).
+
+### Çatdırılma modeli
+
+- **Broadcast növbəsi**: hər Notify nüsxəsi öz müvəqqəti (`exclusive`, `auto-delete`) növbəsini alır və **hər mesajı** görür, çünki bağlantılar nüsxələr arasında bölünüb və yalnız öz klientlərinə göndərə bilər. Redis backplane lazım olmur. (Paylaşılan növbə olsaydı hadisə bir nüsxəyə düşüb digər nüsxədəki klientlərə heç vaxt çatmazdı: test bunu sübut edir.)
+- **Canlı bildiriş itkiyə yol verilən kanaldır**: broadcast növbəsində DLQ və inbox yoxdur, uğursuz və oxunmayan mesaj atılır. Klient yenidən qoşulanda cari vəziyyəti API-dən oxuyur. Dəqiq çatdırılma lazım olan hər şey (billing, bildiriş SMS-i və s.) adi növbələrdədir.
+- **Filialı olmayan hadisələr** yalnız tenant qrupuna düşür. Billing `invoice-issued/voided`, `payment-*` və Scheduling-in hamısı filial daşıyır; `ProcedurePerformed` və plan hadisələri hələ daşımır və canlı kanala qoşulmayıb (`clinical.visit-closed` qoşulub).
+
+### Gateway
+
+| Qayda | Necə |
+|---|---|
+| Marşrutlar | `/v1/auth/**` → identity; `/v1/{patients,appointments,queue,waitlist,visits,treatment-plans,clinical-notes,prescriptions,procedure-codes}/**` → clinic-core; `/v1/{services,invoices,payments,cash-shifts}/**` → billing; `/hubs/**` → notify. Resurs adı **tam uyğunlaşır** (`/v1/patientsX` 404) və siyahıda olmayan yol heç bir servisə çatmır |
+| Tenant | Orijinal `Host` ötürülür (subdomain-dən tenant həlli işləsin). Müştərinin `X-Tenant` başlığı silinir (`Gateway:ForwardTenantHeader=true` yalnız lokal) |
+| Forwarded | `X-Forwarded-*` yalnız `Gateway:TrustedProxies` (IP və ya CIDR) siyahısındakı ingress-dən qəbul edilir; qalanı ignor, gateway öz gördüyünü yenidən yazır. Etibarsız peer `X-Forwarded-Host` ilə Host-u saxtalaşdıra bilmir |
+| Rate limit | IP başına pəncərə: ümumi 600/dəq, `/v1/auth` ayrıca 30/dəq (parol sınağına qarşı); 429 + `Retry-After` |
+| İzləmə | `X-Request-Id` (düzgün gələn saxlanır, yoxsa yaradılır; yalnız `[A-Za-z0-9_-]` ≤64), aşağıya ötürülür və cavabda qaytarılır |
+| Cavab | `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (rədd olunan cavablarda da) |
+| Sağlamlıq | `/health` (öz vəziyyəti, servislərdən asılı deyil), `/health/downstream` (servis adı → `ok/unhealthy/down`, ünvanlar gizlidir, 503 `degraded`) |
+| Limit | Sorğu gövdəsi 10 MB (Kestrel) |
+
+### Testlər (527 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Notify.UnitTests` | 18 | Router (qruplar, ids-only, qarışıq/yanlış payload), üzvlük (scope-lar, `*`, ən yüksək scope, saxta claim-lər), tenant qrup adlarında |
+| `Notify.IntegrationTests` | 13 | Real SignalR + RabbitMQ + PostgreSQL: token olmadan rədd, başqa tenant tokeni rədd, WebSocket + query token, long-polling, tenant/filial/sahə/own izolyasiyası, ids-only, `GetAreas`, iki nüsxə hər ikisi çatdırır, pozulmuş/naməlum tenant mesajı axını saxlamır, token bitəndə bağlantı bağlanır |
+| `Gateway.IntegrationTests` | 35 | Real Kestrel stub servislər: 17 marşrut, 5 naməlum yol, gövdə/query/başlıq/status ötürülməsi, Host, X-Tenant silinməsi, etibarsız və etibarlı forwarded başlıqları, request-id, təhlükəsizlik başlıqları, auth limiti, IP başına limit (etibarlı proxy ilə), 502 təcridi, health |
+
+**Mutasiya yoxlamaları** (kod bərpa olundu): `Broadcast` söndürüləndə "hər nüsxə çatdırır" testi, tenant qrup adından çıxarılanda tenant izolyasiyası testi, query-token yolu söndürüləndə 10 test qırılır.
+
+### Testlərin tapdığı real nöqtələr
+
+- **Gateway Host saxtalaşdırması**: `X-Forwarded-Host` etibarsız peer-dən gələndə də Host-u dəyişdirirdi. Səbəb TestServer-də `RemoteIpAddress`-in `null` olması idi (ForwardedHeaders onda etibar edir); istehsalda Kestrel həmişə IP verir. Test indi ingress-i təqlid edən real IP ilə etibarsız və etibarlı halları ayrıca yoxlayır və etibarsız peer-in Host/For/Proto-nu dəyişə bilmədiyini sübut edir.
+- **WebSocket test müştərisi** `ClientWebSocketOptions` başlıqlarını daşımır; token-i brauzer kimi query string ilə göndərmək lazım gəldi. Bu həm də query-token yolunu real sınağa çevirdi.
+- Test layihəsində `appsettings.json` default-u mutasiyanı gizlədirdi (ilk mutasiya yoxlaması etibarsız idi, düzgün konfiqurasiya ilə təkrarlandı).
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Audit publisher bu dilimdən çıxarıldı və Dilim 7-yə köçürüldü** (Elasticsearch indexer ilə birlikdə): audit axınının yeganə istehlakçısı indexer olacaq, əvvəlcədən publisher yazmaq yararsız yük olardı.
+- **Gateway-də JWT yoxlanmır**: autentifikasiya və tenant yoxlaması servislərdə qalır (defense in depth). Gateway-də token yoxlaması (erkən 401) və JWKS cache-i sonrakı işdir.
+- **Gateway-in rate limit-i prosesdədir** (nüsxə başına). Çox nüsxəli quraşdırmada paylaşılan limit üçün Redis lazımdır (Mərhələ 9).
+- **TLS/HSTS ingress-də** bitir, Gateway-də yoxdur. CORS siyasəti hələ təyin olunmayıb (Frontend dilimində).
+- **Canlı kanal klinik prosedur və plan hadisələrini daşımır** (filial yoxdur); Notify daxilində SMS/e-poçt/push göndərişi (Communication modulu) yoxdur.
+- **Hub-da sərbəst abunə yoxdur**: klient qrup seçə bilmir (bilərəkdən). Məsələn, "bu pasiyentin kartını izləyirəm" kimi dar abunələr lazım olsa icazə yoxlaması ilə əlavə olunmalıdır.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Testcontainers, Elasticsearch, `POST /invoices` idempotentliyi) qüvvədə qalır.
+
+---
+
+## Dilim 7a: Audit publisher və Dashboard
+
+### Audit publisher
+
+- `SqlAuditTrail` audit sətrini yazdığı **eyni tranzaksiyada** `audit.recorded` hadisəsini outbox-a yazır (`INSERT … RETURNING id`, sonra `outbox_messages`). Audit olmadan hadisə, hadisəsiz audit yaranmır; audit uğursuz olarsa hadisə də geri qaytarılır. Hash zənciri toxunulmaz qalır (outbox sətri zəncirdən kənardadır).
+- Yük PHI-sizdir və dəqiq bu sahələrdən ibarətdir: `auditId, action, entity, entityId, userId, occurredAt, details`. Müqavilə: `Audit.Contracts.AuditRecordedV1`. İstehlakçı: Elasticsearch indexer (7c).
+- Test: bir faktura axınında audit sətirlərinin sayı = `audit.recorded` hadisələrinin sayı, hər hadisənin `auditId`-si `audit_log`-dakı eyni `action` ilə uyğundur, yükün açar dəsti sabitdir.
+
+### Dashboard
+
+`GET /v1/dashboard/summary?branchId=&date=` (ClinicCore host-unda, `report:read`). Gateway marşrutu əlavə olundu. Yeni `Modules/Dashboard` (Application + Infrastructure).
+
+| Göstərici | Qayda |
+|---|---|
+| `appointmentsToday` | gün ərzində başlayan randevular; `total` ləğv/yenidən planlanmışı saymır; `completed`, `noShow`, `waiting` (= `checked_in`) |
+| `revenueToday`, `revenueMonth` | qəbul olunan ödənişlər − geri qaytarmalar, ödəniş tarixinə görə; ay = ayın əvvəlindən seçilən günün sonunadək |
+| `outstandingDebt` | rəsmiləşdirilmiş və qismən ödənilmiş fakturaların qalığı (tarixdən asılı deyil, cari borc) |
+| `newPatients` | həmin gün yaradılan (silinməmiş) pasiyentlər |
+| `topServices`, `topProviders` | ayın rəsmiləşdirilmiş fakturalarının sətirləri üzrə gəlir, ilk 5 |
+| `rooms` | aktiv otaqlar: `in_progress` randevusu varsa `occupied`, yoxsa `free` |
+| `revenueSeries` | son 30 yerli gün, boş günlər 0, geri qaytarma günləri mənfi ola bilər |
+
+**Qərarlar**
+- **Gün klinikanın qurşağında hesablanır** (`Dashboard:TimeZone`, default `Asia/Baku`): `[gün 00:00, növbəti gün 00:00)`. UTC ilə hesablansaydı Bakıda gecə yarısından sonrakı randevu və ödənişlər səhv günə düşərdi (test sərhəd dəqiqələrini yoxlayır: 00:00 və 23:29 daxil, əvvəlki gün 23:29 və sonrakı gün 00:00 xaric).
+- **Scope**: `tenant` hamısını (və ya seçilmiş filialı), `branch` yalnız öz filiallarını görür; başqa filialın id-si 404 qaytarır (filial varlığı sızmır); `own` scope və icazəsizlik 403; gələcək tarix 422; filialı olmayan `branch` scope 403.
+- **Keş**: `IDistributedCache`, **30 san** TTL. `ConnectionStrings:Redis` verilibsə Redis, yoxsa proses yaddaşı. Açar `dash:<tenant sxemi>:<gün>:<filial dəsti>`: bir tenant-ın nəticəsi başqasına verilmir (mutasiya testi: tenant açardan çıxarılanda 2 test qırılır). **Keş əlçatmaz olarsa sorğu birbaşa DB-yə düşür**, xəta qaytarmır. Cavab `Cache-Control: no-store`: maliyyə rəqəmləri brauzer/proxy keşinə düşmür.
+- **Oxuma modeli**: Scheduling, Billing və Patient cədvəllərini yalnız oxuyur (hesabat konteksti), sorğular bir bağlantıda, filial filtri hamısında eyni parametrdir.
+
+### Testlər (550 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Dashboard.UnitTests` | 10 | Scope həlli (tenant/branch/`*`/boş/own), yad filial, gələcək tarix, yerli "bu gün" (UTC 21:30 = Bakıda növbəti gün) |
+| `Dashboard.IntegrationTests` | 11 | Real PostgreSQL: bütün göstəricilər əl ilə hesablanmış rəqəmlərlə (2 həkim, 3 faktura, geri qaytarma, keçən ay), 30 günlük seriya (kəbisə fevralı, kənar ödəniş), qurşaq sərhədləri, boş filial, filial scope-u, icazə/anonim/yanlış giriş, tenant izolyasiyası; keş: TTL daxilində keşdən, filial/tenant üzrə ayrı açar, müddət bitəndə yenilənmə, **real Redis**-də açar və TTL, Redis əlçatmaz olanda işləməyə davam |
+| `Billing.IntegrationTests` (+1) | 37 | Hər audit qeydi üçün tam bir `audit.recorded`, yük açarları |
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Keşin köhnəlməsi 30 saniyəyə qədərdir**, hadisə ilə ləğvetmə yoxdur. Canlı yeniləmə üçün klient Notify (SignalR) bildirişi ilə yenidən sorğu göndərə bilər.
+- **Tək valyuta fərziyyəsi**: məbləğlər valyuta çevrilmədən toplanır (tenant başına bir valyuta). Çox valyutalı tenant üçün valyuta üzrə bölgü lazımdır.
+- **`rooms.state` yalnız `free/occupied`**: `cleaning` üçün məlumat mənbəyi (sterilizasiya statusu) yoxdur.
+- **Dashboard sorğuları canlı cədvəllərdən oxuyur** (8 sorğu). Çox böyük tenant üçün yenidən hesablanan günlük aqreqat cədvəli və ya replika oxuması lazım ola bilər; ölçmə Mərhələ 9-da.
+- **Redis üçün qısa timeout-lar** bağlantı sətrində verilməlidir (`connectTimeout`, `syncTimeout`); əks halda əlçatmaz Redis hər sorğunu saniyələrlə ləngidə bilər (test qısa timeout-la işləyir).
+- **Audit axınının istehlakçısı hələ yoxdur** (indexer 7c-dədir); outbox sətirləri 7 gün sonra təmizlənir.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri qüvvədə qalır.
+
+---
+
+## Dilim 7b: Sync (offline klientlər)
+
+### Nə yazıldı
+
+| Hissə | Məzmun |
+|---|---|
+| `T011_sync.sql` | `change_log.xid`, `sync_state`, `sync_client_changes` |
+| `Sync.Contracts` | `ISyncEntityHandler`, `SyncChangeRequest`, `SyncApplyOutcome` (Applied / Conflict / Rejected) |
+| `Sync.Application` | `PullChangesQuery`, `SnapshotQuery`, `PushChangesCommand` (+ validator, audit) |
+| `Sync.Infrastructure` | `SqlSyncReader`, `SyncEntities` (obyekt xəritəsi), `SqlClientChangeStore` |
+| `Clinical.Infrastructure` | `ClinicalNoteSyncHandler`: offline SOAP qeydləri modulun öz əmrləri ilə |
+| ClinicCore host | `GET /v1/sync/pull`, `GET /v1/sync/snapshot`, `POST /v1/sync/push` (Gateway marşrutu əlavə olundu) |
+| `Result`/HTTP | yeni `ErrorType.Gone` → **410** |
+
+### Ən vacib qərar: kursor seq deyil, tranzaksiya sərhədidir
+
+`change_log.seq` **commit sırasını əks etdirmir**: iki paralel tranzaksiyadan kiçik seq-i alan sonra commit edə bilər. Klient böyük seq-ə qədər oxuyubsa, gec commit olan dəyişiklik **səssizcə və həmişəlik itərdi** (offline sinxronun ən təhlükəli xətası). Ona görə:
+
+- Hər jurnal sətri tranzaksiya id-sini (`xid`) daşıyır. Pull yalnız `xid < pg_snapshot_xmin(...)` olan sətirləri qaytarır, yəni **bütün köhnə tranzaksiyaları bitmiş** hissəni. Kursor həmin `xid` sərhədidir və klient onu olduğu kimi saxlayır.
+- Səhifə `xid` sərhədindən kəsilir, bir tranzaksiyanın sətirləri bölünmür (limitdən böyük tranzaksiya bütöv qaytarılır).
+- Test bunu dəqiq təqlid edir: yavaş tranzaksiya açıq ikən sonrakı tranzaksiya commit olur; birinci pull heç birini vermir (kursor yerində qalır), yavaş commit olduqdan sonra ikinci pull **hər ikisini** gətirir. Mutasiya yoxlaması (horizon şərti çıxarılanda) bu testi qırır.
+- OpenAPI-də `since/lastSeq` əvəzinə `cursor` istifadə olunur; `seq` yalnız səhifə daxilində sıralama üçündür.
+
+### Pull / snapshot
+
+- **Cari vəziyyət oxunur, jurnaldakı köhnə məzmun yox**: hər dəyişən sətir üçün cədvəl yenidən oxunur (istifadəçinin icazə və scope-u ilə), eyni obyektin bir pəncərədəki çoxlu dəyişikliyi **son vəziyyətə** yığılır.
+- **Silinmə**: sətir yoxdursa və ya soft-delete olunubsa `op=D` nişanı gedir. **Scope xaricindəki sətir** üçün heç nə göndərilmir (nişan də yox: başqa filialın id-si sızmır).
+- **Scope eyni qaydalarla**: `tenant` hamısı, `branch` yalnız öz filialları, `own` yalnız yaratdığı və ya (ləğv olunmamış qəbulla) baxdığı pasiyentlər; klinik qaralamalar yalnız müəllifə, imzalananlar giriş hüququ olana. İcazəsi olmayan obyekt cavabda yoxdur.
+- **Cihaza getməyən sahələr**: telefon, e-poçt, FIN, ünvan, pasiyent qeydləri açıq siyahıya daxil deyil (itirilmiş cihazdan sızma səthi azalır). Sinxron olunan obyektlər: `branches`, `rooms`, `patients`, `appointments`, `clinical_notes`, `services`. `users` və maliyyə cədvəlləri sinxron olunmur.
+- **410 (tam yenidən sinxron)**: kursor təmizlənmiş jurnaldan köhnədirsə (`sync_state.change_log_purged_through`, saatlıq maintenance 30 gündən köhnə sətirləri silib sərhədi yazır) və ya serverdən irəlidirsə (bərpa olunmuş ehtiyat nüsxə). `/sync/snapshot` obyekti id üzrə səhifələyir; **ilk** çağırışın kursoru saxlanıb pull ondan davam edir (snapshot zamanı olan dəyişikliklər təkrar gələ bilər, tətbiq idempotentdir).
+
+### Push
+
+- **Heç vaxt cədvələ birbaşa yazmır.** Hər dəyişiklik modulun öz əmri ilə gedir (`CreateNoteCommand`, `EditNoteCommand`): icazə, pasiyent scope-u, açıq vizit qaydası, "yalnız müəllif", "imzalanmış qeyd dəyişməzdir" və audit adi API ilə eynidir. Yeni obyektin id-sini klient yaradır.
+- **Idempotentlik**: `clientChangeId` istifadəçi üzrə unikaldır; nəticə (applied / conflict / rejected) `sync_client_changes`-də saxlanır, təkrar göndərmə eyni cavabı qaytarır. Başqa istifadəçinin `clientChangeId`-si rədd olunur. Gözlənilməz istisna nəticə kimi yazılmır (təkrar göndərilə bilər).
+- **Konflikt**: `baseVersion` serverlə uyğun deyilsə `conflicts` qaytarılır (`serverVersion`, `serverData`), `resolution: needs_manual`. Klinik mətn avtomatik birləşdirilmir; klient iki versiyanı həkimə göstərir. Mətn serverdəkinə **bərabərdirsə** (cavab itib və ya iki tərəf eyni nəticəyə gəlib) konflikt deyil, `applied` sayılır.
+- **Qadağalar**: `clinical_notes` silinmir (`note.not_deletable`), `patients`/`invoices` və s. oflayn yazılmır (`sync.entity_not_writable`), U üçün `baseVersion` məcburidir.
+- Audit: `sync.push` (cihaz id-si, applied/conflicts/rejected sayları; klinik məzmun yox).
+
+### Yan düzəlişlər
+
+- Qeyd əmrləri (`CreateNote`, `EditNote`, `SignNote`) DTO-nu **saxlamadan əvvəl** map edirdi, ona görə API **köhnə `rowVersion`** (yeni qeyddə 0) qaytarırdı. İndi saxlanır, sonra map olunur. Offline klient üçün bu kritikdir: növbəti redaktənin `baseVersion`-u bundan götürülür.
+- `CreateNoteCommand.ClientId` və `EditNoteCommand.ExpectedVersion` əlavə olundu (adi API üçün null).
+
+### Testlər (597 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Sync.UnitTests` | 13 | Push orkestrasiyası: nəticələrin siyahılara bölünməsi, replay, başqa istifadəçinin id-si, dəstəklənməyən obyekt qeyd olunmur, istisna yayılır, validator |
+| `Sync.IntegrationTests` | 32 | Real PostgreSQL: I/U/D və cari data, silinmə nişanları, həssas sahələrin olmaması, yığılma, kursorla səhifələmə (təkrar və buraxılma yoxdur), böyük tranzaksiya, **gec commit itmir**, filial/own/icazə scope-ları, scope xaricində nişan yoxdur, tenant izolyasiyası, 410, snapshot səhifələməsi və pull ilə davamı; push: yaratma, replay, redaktə, konflikt, konvergensiya, qaydalar (imzalı, başqa müəllif, silmə), icazə/scope, dəstəklənməyən obyekt, qarışıq dəst, yanlış sorğular, audit, pull ilə dövrə |
+| `Workers.IntegrationTests` (+1) | 15 | Maintenance köhnə jurnalı silir və sərhədi yazır (geri çəkilmir) |
+| `Gateway.IntegrationTests` (+1) | 37 | `/v1/sync/*` marşrutu |
+
+**Mutasiya yoxlamaları** (kod bərpa olundu): horizon şərti çıxarılanda "gec commit itmir" testi; qaralama görünürlüyü çıxarılanda own-scope testi; "silinib" ilə "scope xaricində"ni ayırma çıxarılanda 3 test qırılır.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Offline yazıla bilən yeganə obyekt SOAP qeydidir.** Randevu, odontoqram, pasiyent redaktəsi və s. offline yazılmır (hər biri üçün konflikt qaydası ayrıca qərardır). Mexanizm genişlənməyə hazırdır: modul `ISyncEntityHandler` qeydiyyatdan keçirir.
+- **Konflikt həlli yalnız `needs_manual`-dır.** Sahə səviyyəli avtomatik birləşmə yoxdur (server `baseVersion` tarixçəsini saxlamır).
+- **Pull yalnız ilk 6 obyekti əhatə edir** (visits, allergies, plans, odontogram, invoices yoxdur). Cədvəl `SyncEntities`-ə əlavə olunur; hər biri üçün sahə siyahısı və scope qaydası ayrıca yazılmalıdır.
+- **Scope-un sonradan dəyişməsi**: pasiyent başqa filiala keçərsə köhnə filialın cihazlarındakı surət silinmir (nişan göndərilmir). Cihaz idarəetməsi (uzaqdan silmə) Mərhələ 9-un təhlükəsizlik siyahısındadır.
+- **`deviceId` yoxlanmır** (`user_devices` ilə bağlı deyil), yalnız audit və idempotentlik üçün istifadə olunur.
+- **Cihazdakı məlumat PHI-dir** (klinik qeydlər daxil): mobil/desktop klient lokal bazanı şifrələməlidir (Flutter/MAUI mərhələsində).
+- **Push sinxrondur və ardıcıldır** (dəstdə ≤200 dəyişiklik). Çox böyük offline növbə üçün klient dəstləri bölür.
+- **Horizont klaster üzrədir**: `pg_snapshot_xmin` PostgreSQL klasterindəki BÜTÜN verilənlər bazalarının açıq yazı tranzaksiyalarını nəzərə alır. İstənilən uzunmüddətli yazı tranzaksiyası (hesabat, miqrasiya, ilişmiş bağlantı) bütün tenant-ların sinxronunu və axtarış indeksləməsini onun bitməsinə qədər gecikdirir (itki yoxdur). Monitorinq: `now() - xact_start` ən böyük açıq yazı tranzaksiyası üçün xəbərdarlıq (Mərhələ 9).
+- **`change_log` yalnız trigger qoşulan cədvəllərdə dolur**; yeni sinxron cədvəl əlavə edəndə `attach_standard_triggers` unudulmamalıdır.
+
+---
+
+## Dilim 7c: Elasticsearch indexer və axtarış
+
+**Sınaq real Elasticsearch 8.11.4 ilə aparılıb** (stub yox): mühitdə rəsmi `elasticsearch:8.11.4` image-i (Docker Hub-ın Google güzgüsü `mirror.gcr.io` vasitəsilə) yüklənib, layer-lər çıxarılıb və tək node kimi işə salınıb (`discovery.type: single-node`, security söndürülü, yalnız lokal). Bütün inteqrasiya testləri onunla işləyir; `DENTACORE_TEST_ES` təyin olunmayıbsa atlanır.
+
+### Nə yazıldı
+
+| Hissə | Məzmun |
+|---|---|
+| `Search.Application` | `FindPatientsQuery`, `SearchAuditQuery` (+ validator, scope qaydası, audit), `IPatientSearch`, `IAuditSearch`, `SearchUnavailableException` |
+| `Search.Infrastructure` | `ElasticClient` (REST sarğısı), `ElasticIndexes` (adlar və mapping), `ElasticPatientSearch`, `ElasticAuditSearch`, `AuditIndexConsumer`, `PatientIndexer` + `PatientIndexerService` |
+| `T012_search_indexing.sql` | `indexer_cursors` |
+| ClinicCore | `GET /v1/search/patients`, `GET /v1/admin/audit` (Gateway marşrutları əlavə olundu; `/v1/admin/users` yönləndirilmir) |
+| Workers | audit consumer-i (`search.audit` ← `audit.recorded`) və pasiyent indexer-i |
+| `ErrorType.Unavailable` | → **503** |
+
+### İndeksləmə modeli
+
+- **Audit**: `audit.recorded` (7a) → RabbitMQ → `AuditIndexConsumer`. Sənəd id-si `auditId`-dir və **`_create`** ilə yazılır: təkrar çatdırılma sənədi dəyişmir, ikinci sənəd yaratmır, **eyni `auditId` ilə fərqli məzmun gəlsə mövcud qeyd əzilmir** (test). Audit-in həqiqət mənbəyi PostgreSQL hash zənciridir; ES yalnız axtarış surətidir.
+- **Pasiyent**: hadisələrə güvənmir, `change_log`-dan (T011-in commit-təhlükəsiz `xid` kursoru) qidalanır: redaktə, soft-delete və birbaşa SQL də düşür. Kursor tenant sxemində (`indexer_cursors`) saxlanır və **yalnız Elasticsearch qəbul etdikdən sonra** irəli gedir (ES yıxılsa kursor yerində qalır, itki yoxdur, test). Kursor yoxdursa əvvəlcə **tam doldurma** (backfill).
+- **External versiya**: hər yazı sətirin `row_version`-u ilə `external_gte`: təkrar, gecikmiş və ya sıradan çıxmış yazı daha yeni sənədi əzə bilməz (test: ES-də 999 versiyalı sənədə DB-nin 2-ci versiyası yazıla bilmir).
+- **Bulk nəticəsi sətir-sətir yoxlanılır**: HTTP 200 qaytarsa da ayrı sətirlər uğursuz ola bilər; 409 (daha yeni var) və silmədə 404 gözlənilir, qalanı istisna atır ki, kursor irəli getməsin.
+
+### Axtarış
+
+- **Analiz**: `az_map` simvol xəritəsi (ə→e, ı→i, İ→i, ö→o, ü→u, ş→s, ç→c, ğ→g, böyük hərflər də) + lowercase + asciifolding. İndeksdə `edge_ngram` (yazdıqca axtarış), sorğuda yalnız qatlama. Üç yol birləşir: prefiks (bütün sözlər üst-üstə), **hərf səhvinə dözümlü** (`fuzziness AUTO`) və **kart nömrəsi** dəqiq uyğunluq (boost). Ad, soyad, ata adı istənilən sırada.
+- **Tək simvol** yalnız rəqəm ola bilər (kart nömrəsi `7`); ad üçün ≥2 simvol. Axtarış mətni **sorğu sintaksisi deyil, məlumatdır** (`*:*`, `" OR 1=1`, JSON sətri heç nə qaytarmır, test).
+- **Scope sorğuya yazılır**: `tenant` hamısı/seçilmiş filial, `branch` yalnız öz filialları (`terms` filtri; icazəsiz sətirlər nəticəyə düşmür), yad filial 404. `own` scope dəstəklənmir (403): baxan həkim əlaqəsi indeksdə yoxdur, adi axtarışdan istifadə olunur.
+- **Audit axtarışı**: yalnız **tenant scope-lu** `audit:read`; filtrlər `entity, entityId, userId, action, from, to`; yeni qeydlər əvvəl; `search_after` kursoru; cavab yalnız `auditId, occurredAt, action, entity, entityId, userId` (details **heç vaxt** qaytarılmır). Axtarışın özü audit olunur (`audit.search`, yalnız say).
+- **Mühərrik əlçatmazdırsa 503** (`search.unavailable`), 500 yox; klient adi axtarışa keçir. İndeksi olmayan tenant boş nəticə alır (404 yox).
+
+### Tenant izolyasiyası və PHI
+
+- **Hər tenant-ın ayrı indeksi**: `dc-patients-<tenantId>`, aylıq `dc-audit-<tenantId>-yyyy.MM`. Sorğu indeks adını tenant id-dən server tərəfdə qurur (istifadəçi daxil etdiyi adla yox), əlavə olaraq hər sənəddə və sorğuda `tenantId` filtri var.
+- **Pasiyent indeksinə yalnız ad sahələri düşür** (`firstName, lastName, fatherName, fullName, chartNo, status, branchId`): telefon, e-poçt, FIN, ünvan və qeydlər heç vaxt. Mapping `dynamic: strict`: gözlənilməz sahə yazılsa Elasticsearch rədd edir (test).
+- Ad PHI-dir: cavab `no-store`, auditə axtarış mətni deyil yalnız nəticə sayı yazılır. **İstehsalda Elasticsearch-ün özü şifrələnməli və autentifikasiyalı olmalıdır** (`ApiKey`/TLS); lokal test klasteri yalnız loopback-dədir.
+
+### Testlər (646 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Search.UnitTests` | 18 | Scope həlli, yad filial heç vaxt mühərrikə çatmır, outage → 503 xətası, validator, audit təsviri mətn daşımır |
+| `Search.IntegrationTests` | 26 | **Real ES**: hərf qatlaması (qısa prefikslər fuzzy ilə xilas olmur), sözlərin sırası, hərf səhvi, relevans sırası, kart nömrəsi, sorğu sintaksisi inyeksiyası, limit; filial scope-u, tenant izolyasiyası (ayrı indekslər), indeksdə yalnız ad sahələri, audit-də mətn yoxdur; indeksləmə (redaktə/silmə/yeni), backfill, external versiya, ES yıxılanda kursor yerində, 503, boş indeks, strict mapping; audit: real API əməliyyatları → filtrlər, səhifələmə (təkrarsız), idempotent və əzilməz, aylıq indekslər, tenant/scope, yanlış girişlər |
+| `Workers.IntegrationTests` (+2) | 17 | **PostgreSQL → RabbitMQ → Workers → Elasticsearch** bütün zənciri: audit outbox sətri aylıq indeksə düşür; pasiyent əlavə/redaktə/silmə indeksə gəlir |
+| `Gateway.IntegrationTests` (+3) | 40 | `/v1/search/*`, `/v1/admin/audit`; `/v1/admin/users` yönləndirilmir |
+
+**Mutasiya yoxlamaları** (kod bərpa olundu; hamısı real ES ilə): filial filtri çıxarılanda, audit `_create` əvəzinə yenidən yazılanda, `external_gte` çıxarılanda, sorğu analizatorundan AZ xəritəsi çıxarılanda uyğun test qırılır. (İlk "AZ qatlaması" mutasiyası sağ qaldı: fuzzy axtarış testləri gizlədirdi; qısa prefiks assertion-ları əlavə olundu və mutasiya indi tutulur.)
+
+### Testlərin tapdığı nöqtələr
+
+- **Validator xətası**: `x is A or B && C` ifadəsində `&&` bütün `is` nəticəsinə tətbiq olunurdu, ona görə hər sorğu rədd olunurdu (real inteqrasiya testi tutdu). Aydın metodla əvəz olundu. Kart nömrəsi üçün tək rəqəm icazəsi də bu testdən çıxdı.
+- **Horizont klaster üzrədir**: `pg_snapshot_xmin` başqa verilənlər bazalarındakı açıq yazı tranzaksiyalarını da nəzərə alır. Paralel test layihələri eyni PostgreSQL klasterində işləyəndə pull/indexer bir müddət geridə qala bilirdi (test təsadüfi qırılırdı). Davranış düzgündür (yalnız gecikmə, itki yox), testlər indi horizontun öz yazılarını keçməsini gözləyir və `cursor`-un bərabərliyi yox, geri çəkilməməsi yoxlanılır. Sync sənədinə bu fakt əlavə olundu: **istehsalda uzunmüddətli yazı tranzaksiyası bütün sinxronu və indeksləməni gecikdirər** (monitorinq qaydası Mərhələ 9-da).
+
+### Testləri necə işə salmaq (mühit dəyişənləri)
+
+| Dəyişən | Nə üçün | Nümunə |
+|---|---|---|
+| `DENTACORE_TEST_PG` | Bütün inteqrasiya testləri (PostgreSQL superuser bağlantısı) | `Host=/tmp;Port=54329;Username=postgres;Database=postgres` |
+| `DENTACORE_TEST_AMQP` | Workers və Notify | `amqp://guest:guest@localhost:5672/` |
+| `DENTACORE_TEST_REDIS` | Dashboard keşi (Redis testi) | `127.0.0.1:6390` |
+| `DENTACORE_TEST_ES` | Search və Workers boru xətti | `http://127.0.0.1:9200` |
+
+Dəyişən yoxdursa ona bağlı testlər **atlanır** (uğursuz sayılmır). Mərhələ 9-da CI hamısını servis konteynerləri ilə təyin edəcək.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Yalnız pasiyent adı və audit indeksləndi.** Klinik qeyd və sənəd axtarışı yoxdur: məzmun PHI-dir və ayrıca qərar tələb edir (şifrələmə, sahə səviyyəli icazə, saxlama müddəti).
+- **`own` scope axtarışda dəstəklənmir** (403). Baxan həkim əlaqəsini indeksə köçürmək randevu hadisələrini də indeksləməyi tələb edir.
+- **Telefon və FIN ilə axtarış yoxdur**: onlar şifrəlidir və yalnız PostgreSQL-dəki blind index ilə dəqiq axtarılır (adi pasiyent axtarışı).
+- **Audit axtarışı iki mənbədən yalnız birini göstərir**: Elasticsearch-də olanı. Consumer geridədirsə yeni qeydlər bir qədər gec görünür; bütövlük yoxlaması hələ `IAuditChainVerifier` ilə PostgreSQL üzərindədir.
+- **İndeksin yenidən qurulması** (mapping dəyişəndə) avtomatik deyil: yeni indeks adı/alias və `indexer_cursors`-dan `patients-es` sətrini silmək lazımdır (backfill təkrarlanır). Alias ilə sıfır dayanma qaçışı Mərhələ 9-da.
+- **GDPR silmə**: tenant silinəndə indekslər əl ilə silinməlidir (`dc-*-<tenantId>*`); pasiyent silinməsi (soft-delete) indeksdən çıxarılır, amma audit indeksində `entityId` qalır (audit dəyişməzdir).
+- **Replika və shard sayı** konfiqurasiya ilədir (`Elasticsearch:Shards/Replicas`, default 1/0). İstehsal klasteri üçün ölçü seçimi Mərhələ 9-dadır.
+- **Elasticsearch 8.11 ilə sınaqdan keçib**; 9.x ilə uyğunluq yoxlanılmayıb.
+
+### Mərhələ 7-nin yekunu
+
+Slice 1–7 tamdır: BuildingBlocks və Identity, Patient, Scheduling, Clinical, mesajlaşma, Billing, Notify və Gateway, Audit publisher və Dashboard, Sync, Elasticsearch. **Qalan (spesifikasiyada Mərhələ 7-yə aid):** Frontend (Next.js). Mobil (Flutter), desktop (MAUI), Inventory, Laboratory, HR, Accounting, CRM, Imaging, AI modulları spesifikasiyanın Faza 2–3 hissəsidir və əvvəlcədən razılaşdırılmış plana görə bu MVP dilimlərinə daxil deyil.
+
+---
+
+## Dilim 8a: Frontend əsası (Next.js)
+
+`frontend/` pnpm workspace-dir: `@dentacore/api-client`, `@dentacore/ui`, `@dentacore/web` (Next.js 16 App Router, React 19, TypeScript strict).
+
+| Paket | Məsuliyyət |
+|---|---|
+| `api-client` | `api/openapi.yaml`-dan `openapi-typescript` ilə **generasiya olunmuş tiplər** (`pnpm gen:api`, commit olunur) + `openapi-fetch` klienti. Bearer, dev `X-Tenant`, **401-də tək-uçuşlu refresh və bir dəfə təkrar** (body `clone()` ilə təkrar göndərilir), `ApiError` (RFC 9457 + `code`), `newIdempotencyKey()`, `ifMatch()`. |
+| `ui` | `tokens.css` (M3 + glass, dark/light) üzərində `Button, Card, TextField/SelectField, Badge, Alert, Skeleton, EmptyState, Spinner, ThemeToggle`. Etiket/hint/xəta `aria-describedby` ilə bağlıdır; Badge rəngdən əlavə simvol daşıyır; `prefers-reduced-motion/transparency` nəzərə alınıb; tema `localStorage` bloklananda OS seçiminə düşür. |
+| `web` | Login, qorunan shell (skip-link, rola görə naviqasiya, tema, çıxış), dashboard (KPI, əlçatan SVG qrafik + cədvəl, otaqlar, xidmətlər), SignalR realtime. |
+
+### Autentifikasiya (BFF)
+
+- Brauzer **heç vaxt refresh token görmür**: `/api/session/{login,refresh,logout}` route handler-ləri Identity-ni çağırıb refresh token-i `HttpOnly; SameSite=Strict; Path=/api/session` (+ prod-da `Secure`) cookie-yə yazır, JSON-da yalnız `accessToken` qaytarır.
+- Access token **yalnız yaddaşdadır** (localStorage/sessionStorage yox; test təsdiq edir). Səhifə yenilənəndə cookie ilə `refresh` çağırılıb sessiya bərpa olunur.
+- CSRF: `SameSite=Strict` + BFF-də **Origin == Host yoxlaması** (yoxdursa/yadırsa 403, upstream çağırılmır).
+- Kirayəçi: prod-da `Host` (`X-Forwarded-Host`) Gateway-ə ötürülür; `X-Tenant` yalnız `DEV_TENANT` təyin olunanda göndərilir.
+- Etibarsız refresh token (401/400) cookie-ni silir; müvəqqəti 5xx silmir. Logout upstream əlçatmaz olsa da cookie-ni silir.
+- 2FA: login `202` challenge qaytaranda UI məlumat göstərir, **təsdiq ekranı sonrakı dilimdədir** (backend `2fa/verify` də hələ yoxdur).
+
+### Realtime
+
+`useRealtime` `/hubs/notifications`-a qoşulur (token hər qoşulmada təzə), server bildirişi yalnız "nə dəyişdi" daşıyır, klient `scheduling.* / billing.* / clinical.*` hadisələrində `dashboard`, `appointments`, `invoices`, `visits` sorğu açarlarını etibarsız edir. Qoşulma alınmasa tətbiq refetch ilə işləməyə davam edir.
+
+### Test və yoxlama
+
+`api-client` 11, `ui` 12 (axe daxil), `web` 26 (BFF cookie/Origin/tenant başlıqları, icazə naviqasiyası, realtime xəritəsi, token yaddaşı, xəta mesajları, qrafik a11y) test; hamısı keçir. `eslint` təmiz, `next build` uğurlu. Real `next start` ilə saxta Identity-yə qarşı login cavabı yoxlandı (cookie atributları, cross-origin 403).
+
+### Məlum məhdudiyyətlər
+
+- Rəng kontrastı axe-də jsdom-da yoxlanmır (CSS yoxdur): Playwright e2e-də (8b) real brauzerdə yoxlanacaq.
+- Dashboard filial seçimi və tarix seçimi hələ yoxdur (server defaultu: icazəli filiallar, bu gün).
+- Naviqasiya linkləri `/patients, /calendar, /billing` 8b-də yaradılır; hələ 404 verir.
+- Offline rejim və sync UI yoxdur (backend hazırdır).
+
+---
+
+## Dilim 8b: Əsas ekranlar, DevSeed və real-stack e2e
+
+### Ekranlar
+
+| Ekran | Qeyd |
+|---|---|
+| Pasiyentlər | Yazdıqca axtarış (300 ms debounce). **Elasticsearch**, `503/403` olarsa **avtomatik PostgreSQL axtarışına** keçir; kursorla "Daha çox". Qeydiyyat: `Idempotency-Key` formada sabit qalır, `409 patient.duplicate` xəta yox **qərardır** ("Yenə də yarat" → `confirmDuplicate=true`). Kart: ağır allergiya xəbərdarlığı, maskalı telefon/e-poçt/FİN, "Məlumatları göstər" **30 s-dən sonra avtomatik maskalanır** (hər açılış serverdə audit olunur). |
+| Təqvim | Günün qəbulları, vəziyyət simvol+mətnlə, statusa görə Gəldi / Gəlmədi / Ləğv. Server qaydaları (check-in pəncərəsi) xəta mesajı ilə göstərilir. |
+| Maliyyə | Faktura siyahısı + status filtri, kassa smeni kartı, faktura detalı, ödəniş. `PaymentAttempt`: bir cəhd = bir `Idempotency-Key`, şəbəkə xətasından sonra **eyni açarla** təkrar (iki dəfə çıxılmaz), yalnız uğurdan sonra yeni açar. Artıq məbləğ serverə getmir. |
+| Naviqasiya | İdarə panelinə icazəsi olmayan rol (qəbul, həkim) ilk əlçatan bölməyə yönləndirilir. |
+
+### Alətlər
+
+- `backend/tools/DentaCore.DevSeed`: platform + tenant sxemi, filial, kabinet, 3 istifadəçi (`admin@`, `reception@`, `doctor@<slug>.test`, Argon2id), həkim qrafiki, 2 xidmət. **Idempotentdir**; parol verilməsə təsadüfi yaradılır və yalnız stdout-a yazılır. `src/` arxitektura qaydalarından kənardadır, istehsalda işlədilmir.
+- `infra/dev/run-stack.sh start|stop`: Identity, ClinicCore, Billing, Notify, Workers, Gateway-i qaldırır (RSA/PII açarları yalnız `STACK_DIR`-də yaradılır, repoya düşmür). Redis və Elasticsearch könüllüdür (`DENTACORE_REDIS`, `DENTACORE_ES`).
+
+### E2E (Playwright, REAL backend: PostgreSQL + RabbitMQ + 6 servis)
+
+13 test: giriş/çıxış və cookie atributları, tokenin storage-da olmaması, rola görə naviqasiya, pasiyent yaratma/axtarış/maska, dublikat, qəbul + check-in, kassa smeni + hissə-hissə ödəniş, artıq ödənişin bloklanması, **axe (WCAG 2.2 AA, real kontrast) açıq və tünd temada bütün ekranlarda: pozuntu yoxdur**. Elasticsearch olmadan işləyir (fallback yolunu da sınayır).
+
+Işə salmaq: `infra/dev/run-stack.sh start` → `pnpm --filter @dentacore/web e2e:build` → `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium pnpm --filter @dentacore/web e2e`. `API_ORIGIN` və `NEXT_PUBLIC_DEV_TENANT` Next **build** zamanı sabitlənir (rewrites + brauzer kodu).
+
+### E2E-nin tapdığı real səhvlər (mock-lu testlər tutmazdı)
+
+1. **`GET /auth/me` `branches` qaytarmırdı** (spesifikasiyada var idi): UI filialsız qalırdı, pasiyent yaratmaq mümkün deyildi. Backend düzəldildi (bütün-filial hüququ = bütün aktiv filiallar; filial-scope-lu istifadəçi yalnız öz filialları), 3 unit + 1 inteqrasiya testi. Spesifikasiyadan backend-in qaytarmadığı `specialty`/`locale` çıxarıldı.
+2. **OpenAPI ilə backend uyğunsuzluqları**: pasiyent siyahısı (`PatientListItem`), `Invoice` cavab sxemi (`items[].id/lineTotal`), `CashShift` sxemi. Düzəldildi, tiplər yenidən generasiya olundu.
+3. **`ApiError` kodu itirirdi**: `openapi-fetch` cavab gövdəsini artıq oxuduğu üçün `response.clone().json()` boş idi. `toApiError(error, response)` əlavə olundu (13 api-client testi).
+4. **SignalR `tenant.not_found`**: SignalR öz `fetch`-i ilə işləyir, `X-Tenant` başlığı getmirdi (dev-də). `headers` əlavə olundu.
+5. **Gateway auth limiti** (30/dəq/IP) e2e-ni 429-a salırdı: bu test mühitinin konfiqurasiyasıdır (`run-stack.sh`-də qaldırıldı), istehsal defaultu dəyişmədi.
+
+### Məlum məhdudiyyətlər
+
+- Təqvim gün siyahısıdır (həkim sütunları yox): həkim/kabinet adlarını verən endpoint hələ yoxdur (yalnız id var). Drag&drop, yeni qəbul formu, boş slot seçimi sonrakı iş.
+- Faktura yaratma/verilmə, geri qaytarma və smenin bağlanması UI-da yoxdur (API hazırdır).
+- E2E bazası təkrar işə salmalar arasında saxlanır: "smen yoxdur" xəta yolu yalnız təmiz bazada işləyir (smen artıq açıq olarsa test onu atlayır). Qəbul testi 5 dəqiqəlik təsadüfi boş slot seçir; Bakı vaxtı ilə gecə yarısına yaxın (qrafik 00:00–23:59, slot günü keçə bilməz) uyğun slot tapılmazsa test **atlanır** (uğursuz saymır). Gecə yarısı ilə təkrarlanan 3 tam işə salmada 13/13 və 12 keçdi + 1 atlandı.
+- E2E hələ CI-də deyil (Mərhələ 9). Elasticsearch ilə e2e ayrıca işə salınmayıb.
+
+> Növbəti: **Mərhələ 8 (Testing)**: bütün test pillələrinin (unit, inteqrasiya, e2e, yük, təhlükəsizlik) strategiyası, əhatə və boşluqların bağlanması. Sonra 9 (Deployment: CI, Docker, K8s) və 10 (Documentation). Davam etmək üçün **"Davam et"** yazın.

@@ -1,0 +1,42 @@
+<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard · DentaCore</title><link rel="stylesheet" href="wireframes.css"></head><body>
+<main id="app">
+  <h1>Salam, Nərmin 👋 <span class="sub">Bazar ertəsi, 6 oktyabr</span></h1>
+  <section class="grid g4" aria-label="Əsas göstəricilər">
+    <div class="card kpi"><div class="sub">Bugünkü qəbul</div><div class="v">24</div><div class="d">✔ 11 bitib · ⏳ 3 gözləyir · ✖ 1 no-show</div></div>
+    <div class="card kpi"><div class="sub">Bugünkü gəlir</div><div class="v">3 480 ₼</div><div class="d up">▲ 12% dünənə görə</div></div>
+    <div class="card kpi"><div class="sub">Ümumi borc</div><div class="v">18 920 ₼</div><div class="d down">▼ 41 borclu pasiyent</div></div>
+    <div class="card kpi"><div class="sub">Yeni pasiyentlər (ay)</div><div class="v">67</div><div class="d up">▲ 8 keçən aya görə</div></div>
+  </section>
+  <section class="grid g2" style="margin-top:16px">
+    <div class="card"><h2>Gəlir, son 14 gün</h2>
+      <svg id="rev" viewBox="0 0 560 180" width="100%" role="img" aria-label="Son 14 gün gəlir qrafiki: orta 3 100 manat, ən yüksək 4 200 manat"></svg>
+      <div class="sub">Cədvəl görünüşü üçün Enter · Hover: dəqiq məbləğ</div></div>
+    <div class="card"><h2>Kabinetlər (canlı)</h2>
+      <table aria-label="Kabinet vəziyyəti"><tbody>
+        <tr><td>Kabinet 1</td><td><span class="chip err">● Məşğul</span></td><td class="sub">Dr. Əliyeva · 23 dəq</td></tr>
+        <tr><td>Kabinet 2</td><td><span class="chip err">● Məşğul</span></td><td class="sub">Dr. Həsənov · 8 dəq</td></tr>
+        <tr><td>Kabinet 3</td><td><span class="chip ok">● Boş</span></td><td class="sub">növbəti 14:30</td></tr>
+        <tr><td>Rentgen</td><td><span class="chip warn">● Təmizlik</span></td><td class="sub">~4 dəq</td></tr></tbody></table>
+      <div class="note">Boş kabinet var + növbədə gözləyən pasiyent → «Növbəti pasiyenti çağır» düyməsi çıxır.</div></div>
+  </section>
+  <section class="grid g3" style="margin-top:16px">
+    <div class="card"><h2>Ən çox xidmət</h2><table><tbody>
+      <tr><td>Plomb (kompozit)</td><td>42</td><td class="sub">5 880 ₼</td></tr>
+      <tr><td>Peşəkar təmizlik</td><td>31</td><td class="sub">2 790 ₼</td></tr>
+      <tr><td>Kanal müalicəsi</td><td>18</td><td class="sub">4 320 ₼</td></tr></tbody></table></div>
+    <div class="card"><h2>Ən çox gəlir gətirən həkim</h2><table><tbody>
+      <tr><td>🥇 Dr. Həsənov (implant)</td><td class="sub">14 200 ₼</td></tr>
+      <tr><td>🥈 Dr. Əliyeva</td><td class="sub">9 640 ₼</td></tr>
+      <tr><td>🥉 Dr. Quliyev</td><td class="sub">7 115 ₼</td></tr></tbody></table></div>
+    <div class="card"><h2>Diqqət tələb edir</h2>
+      <p><span class="chip warn">3</span> sabah təsdiqlənməmiş qəbul</p>
+      <p><span class="chip err">2</span> vaxtı keçmiş ödəniş taksiti</p>
+      <p><span class="chip">1</span> lab sifarişi gecikir <span class="sub">(Faza 2)</span></p></div>
+  </section>
+</main>
+<script src="shared.js"></script><script>
+mountShell('Dashboard');
+const d=[2800,3100,2400,3900,4200,3300,1200,2900,3500,3000,3800,3600,3100,3480], W=560,H=180,bw=W/d.length;
+document.getElementById('rev').innerHTML=d.map((v,i)=>{const h=v/4400*(H-30);return `<rect x="${i*bw+6}" y="${H-20-h}" width="${bw-12}" height="${h}" rx="6" fill="var(--md-primary)" opacity="${i===d.length-1?1:.55}"><title>${v} ₼</title></rect>`}).join('')+`<line x1="0" x2="${W}" y1="${H-20}" y2="${H-20}" stroke="var(--md-outline-variant)"/>`;
+</script></body></html>
