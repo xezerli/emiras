@@ -1,10 +1,13 @@
+import base64
+import binascii
 import os
 from fastapi import FastAPI, HTTPException
 
 from app import sessions
 from app.connectors import registry
 from app.etaxes import DemoETaxes, ETaxesClient, LiveETaxes, to_rows
-from app.schemas import ApiResult, BankRequest, TaxRequest, UpdateRequest
+from app.schemas import ApiResult, BankRequest, StatementRequest, TaxRequest, UpdateRequest
+from app.statements import StatementError, detect_and_parse
 
 app = FastAPI(title="AZ-API")
 registry.load_all()
@@ -69,3 +72,16 @@ async def tax_list(req: TaxRequest):
         return res
     except Exception as e:
         return ApiResult(message=f"e-taxes: {e}")
+
+
+@app.post("/api/1c/statement", response_model=ApiResult)
+async def statement(req: StatementRequest):
+    """Bank çıxarışı Excel faylı (base64) -> bank_ops sətirləri. Bank formatı avtomatik tanınır."""
+    try:
+        st = detect_and_parse(base64.b64decode(req.data, validate=True))
+    except (StatementError, binascii.Error) as e:
+        return ApiResult(message=f"Çıxarış: {e}")
+    msg = f"{st.bank}: {len(st.txs)} əməliyyat ({st.iban})."
+    if warn := st.check():
+        msg += " " + warn
+    return ApiResult(success=True, data=st.to_rows(), message=msg)

@@ -56,3 +56,8 @@ class BankRequest(BaseModel):
 
 class UpdateRequest(BaseModel):
     data: str = ""               # base64 of the current .epf
+
+
+class StatementRequest(BaseModel):
+    filename: str = ""
+    data: str = ""               # base64 of the .xlsx statement
