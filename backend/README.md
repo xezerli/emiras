@@ -41,3 +41,8 @@ c40 ƏDV, c41 digər vergi, c43 barkod, c44 `mal`|`xidmət`.
 `LiveETaxes` hələ boşdur. Real portal çağırışları (ASAN giriş, sertifikat seçimi, qaimə axtarışı)
 sənədləşdirilmiş ictimai API deyil, brauzerin şəbəkə sorğularından çıxarılmalıdır
 (DevTools -> Network -> "Save all as HAR", həssas başlıqları silin). Bank plaginləri üçün də eynisi.
+
+## Deploy (HTTPS)
+    AZAPI_DOMAIN=api.sizin-domen.az docker compose up -d --build
+Domenin A qeydi serverin IP-sinə yönəlməlidir. Sonra 1C emalında `HTTPСоединение("api.sizin-domen.az", ...)`.
+Qeyd: sessiyalar yaddaşdadır, ona görə yalnız bir `api` instansı işlədin.

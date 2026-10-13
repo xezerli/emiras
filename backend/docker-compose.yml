@@ -1,0 +1,17 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    environment:
+      AZAPI_ETAXES: ${AZAPI_ETAXES:-demo}
+      AZAPI_DEMO: ${AZAPI_DEMO:-0}
+  caddy:                      # avtomatik HTTPS sertifikatı (Let's Encrypt)
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [api]
+volumes:
+  caddy_data:
