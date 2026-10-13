@@ -108,6 +108,29 @@ public sealed class OutboxProcessorTests(MessagingFixture fx)
     }
 
     [MessagingFact]
+    public async Task Maintenance_purges_old_change_log_rows_and_records_the_horizon_that_forces_clients_to_resync()
+    {
+        await fx.Db.ExecAsync(TestData.Schema, "DELETE FROM sync_state");
+        var entity = Guid.NewGuid();
+        await fx.Db.ExecAsync(TestData.Schema, "INSERT INTO change_log(entity, entity_id, op, changed_at) VALUES ('patients', $1, 'I', now() - interval '40 days')", entity);
+        var oldXid = await fx.Db.ScalarAsync<long>(TestData.Schema, "SELECT xid::text::bigint FROM change_log WHERE entity_id = $1", entity);
+        await fx.Db.ExecAsync(TestData.Schema, "INSERT INTO change_log(entity, entity_id, op) VALUES ('patients', $1, 'I')", Guid.NewGuid());   // təzə sətir qalmalıdır
+
+        await using var sp = fx.BuildProcessorServices();
+        await sp.GetRequiredService<TenantMaintenance>().RunOnceAsync(default);
+
+        Assert.Equal(0, await fx.Db.ScalarAsync<long>(TestData.Schema, "SELECT count(*) FROM change_log WHERE entity_id = $1", entity));
+        Assert.True(await fx.Db.ScalarAsync<long>(TestData.Schema, "SELECT count(*) FROM change_log WHERE changed_at > now() - interval '1 day'") >= 1);
+        Assert.True(await fx.Db.ScalarAsync<long>(TestData.Schema, "SELECT value FROM sync_state WHERE key = 'change_log_purged_through'") > oldXid);
+
+        // təkrar işə salma sərhədi geri çəkmir və xəta vermir
+        var before = await fx.Db.ScalarAsync<long>(TestData.Schema, "SELECT value FROM sync_state WHERE key = 'change_log_purged_through'");
+        await sp.GetRequiredService<TenantMaintenance>().RunOnceAsync(default);
+        Assert.Equal(before, await fx.Db.ScalarAsync<long>(TestData.Schema, "SELECT value FROM sync_state WHERE key = 'change_log_purged_through'"));
+        await fx.Db.ExecAsync(TestData.Schema, "DELETE FROM sync_state");
+    }
+
+    [MessagingFact]
     public async Task Maintenance_creates_audit_partitions_two_months_ahead_and_is_idempotent()
     {
         const string countSql = "SELECT count(*)::int FROM pg_inherits WHERE inhparent = 'audit_log'::regclass";

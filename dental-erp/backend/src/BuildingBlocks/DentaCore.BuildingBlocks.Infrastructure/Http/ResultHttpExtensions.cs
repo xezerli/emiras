@@ -18,6 +18,7 @@ public static class ResultHttpExtensions
             ErrorType.Conflict => StatusCodes.Status409Conflict,
             ErrorType.PreconditionFailed => StatusCodes.Status412PreconditionFailed,
             ErrorType.Locked => StatusCodes.Status423Locked,
+            ErrorType.Gone => StatusCodes.Status410Gone,
             _ => StatusCodes.Status500InternalServerError,
         };
 

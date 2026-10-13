@@ -20,7 +20,14 @@ public sealed partial class TenantMaintenance(ITenantEnumerator tenants, ITenant
         "SELECT audit_create_partition((current_date + interval '2 month')::date)",
         "DELETE FROM outbox_messages WHERE id IN (SELECT id FROM outbox_messages WHERE processed_at < now() - interval '7 days' LIMIT 5000)",
         "DELETE FROM refresh_tokens WHERE id IN (SELECT id FROM refresh_tokens WHERE expires_at < now() - interval '30 days' LIMIT 5000)",
-        "DELETE FROM change_log WHERE seq IN (SELECT seq FROM change_log WHERE changed_at < now() - interval '30 days' LIMIT 5000)",
+        // Jurnal təmizlənəndə sərhəd yazılır: kursoru ondan kiçik klient sinxronu tam yeniləməlidir (410)
+        """
+        WITH d AS (DELETE FROM change_log WHERE seq IN (SELECT seq FROM change_log WHERE changed_at < now() - interval '30 days' ORDER BY seq LIMIT 5000) RETURNING xid)
+        INSERT INTO sync_state(key, value)
+        SELECT 'change_log_purged_through', max(xid::text::bigint) + 1 FROM d HAVING count(*) > 0
+        ON CONFLICT (key) DO UPDATE SET value = greatest(sync_state.value, EXCLUDED.value)
+        """,
+        "DELETE FROM sync_client_changes WHERE client_change_id IN (SELECT client_change_id FROM sync_client_changes WHERE created_at < now() - interval '90 days' LIMIT 5000)",
     ];
 
     public async Task RunOnceAsync(CancellationToken cancellationToken)

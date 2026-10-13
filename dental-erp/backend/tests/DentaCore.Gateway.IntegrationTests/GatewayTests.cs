@@ -55,6 +55,7 @@ public sealed class GatewayTests : IAsyncLifetime
     [InlineData("/v1/prescriptions", "clinic-core")]
     [InlineData("/v1/procedure-codes", "clinic-core")]
     [InlineData("/v1/dashboard/summary", "clinic-core")]
+    [InlineData("/v1/sync/pull", "clinic-core")]
     [InlineData("/v1/services", "billing")]
     [InlineData("/v1/invoices/1/payments", "billing")]
     [InlineData("/v1/payments/1/refund", "billing")]

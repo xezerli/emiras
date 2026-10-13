@@ -16,7 +16,8 @@ internal static class NoteMapper
         new(n.Id, n.PatientId, n.VisitId, n.AuthorId, n.Subjective, n.Objective, n.Assessment, n.Plan, n.Source, n.SignedAt, n.AddendumOf, n.CreatedAt, n.RowVersion);
 }
 
-public sealed record CreateNoteCommand(Guid PatientId, Guid? VisitId, string? Subjective, string? Objective, string? Assessment, string? Plan, string? Source, Guid? AddendumOf)
+/// <param name="ClientId">Offline klientin özü yaratdığı id (sync): eyni id təkrar gələndə mövcud qeyd qaytarılır (idempotent).</param>
+public sealed record CreateNoteCommand(Guid PatientId, Guid? VisitId, string? Subjective, string? Objective, string? Assessment, string? Plan, string? Source, Guid? AddendumOf, Guid? ClientId = null)
     : ICommand<NoteDto>, IRequiresAccess, IAuditable<NoteDto>
 {
     public string Permission => ClinicalPermissions.Write;
@@ -29,7 +30,7 @@ public sealed class CreateNoteCommandValidator : AbstractValidator<CreateNoteCom
     public CreateNoteCommandValidator() => RuleFor(x => x.PatientId).NotEmpty();
 }
 
-internal sealed class CreateNoteCommandHandler(IClinicalRepository repository, ClinicalAccess access, ICurrentUser user, IClock clock)
+internal sealed class CreateNoteCommandHandler(IClinicalRepository repository, ClinicalAccess access, ICurrentUser user, IClinicalUnitOfWork unitOfWork, IClock clock)
     : IRequestHandler<CreateNoteCommand, NoteDto>
 {
     public async Task<Result<NoteDto>> Handle(CreateNoteCommand request, CancellationToken cancellationToken)
@@ -63,8 +64,17 @@ internal sealed class CreateNoteCommandHandler(IClinicalRepository repository, C
             }
         }
 
+        var id = request.ClientId ?? Guid.NewGuid();
+        if (request.ClientId is not null && await repository.GetNoteAsync(id, cancellationToken) is { } existing)
+        {
+            // Təkrar göndərmə (şəbəkə kəsilib, klient nəticəni almayıb): eyni müəllif və pasiyent üçün mövcud qeyd qaytarılır
+            return existing.AuthorId == user.UserId && existing.PatientId == request.PatientId
+                ? NoteMapper.ToDto(existing)
+                : Error.Conflict("note.id_taken", "A note with this id already exists.");
+        }
+
         var note = ClinicalNote.Create(
-            Guid.NewGuid(), request.PatientId, request.VisitId, user.UserId,
+            id, request.PatientId, request.VisitId, user.UserId,
             new SoapText(request.Subjective, request.Objective, request.Assessment, request.Plan), request.Source ?? "typed", request.AddendumOf, clock.UtcNow);
         if (note.IsFailure)
         {
@@ -72,11 +82,13 @@ internal sealed class CreateNoteCommandHandler(IClinicalRepository repository, C
         }
 
         repository.Add(note.Value);
+        await unitOfWork.SaveChangesAsync(cancellationToken);   // DB-nin təyin etdiyi rowVersion DTO-ya düşsün
         return NoteMapper.ToDto(note.Value);
     }
 }
 
-public sealed record EditNoteCommand(Guid NoteId, string? Subjective, string? Objective, string? Assessment, string? Plan)
+/// <param name="ExpectedVersion">Verilibsə və qeydin versiyası fərqlidirsə 412 (sync konflikti). Adi API üçün null.</param>
+public sealed record EditNoteCommand(Guid NoteId, string? Subjective, string? Objective, string? Assessment, string? Plan, int? ExpectedVersion = null)
     : ICommand<NoteDto>, IRequiresAccess, IAuditable<NoteDto>
 {
     public string Permission => ClinicalPermissions.Write;
@@ -84,7 +96,7 @@ public sealed record EditNoteCommand(Guid NoteId, string? Subjective, string? Ob
     public AuditDescriptor Describe(NoteDto response) => new("note.update", "clinical_note", NoteId);
 }
 
-internal sealed class EditNoteCommandHandler(IClinicalRepository repository, ClinicalAccess access, ICurrentUser user)
+internal sealed class EditNoteCommandHandler(IClinicalRepository repository, ClinicalAccess access, ICurrentUser user, IClinicalUnitOfWork unitOfWork)
     : IRequestHandler<EditNoteCommand, NoteDto>
 {
     public async Task<Result<NoteDto>> Handle(EditNoteCommand request, CancellationToken cancellationToken)
@@ -100,8 +112,19 @@ internal sealed class EditNoteCommandHandler(IClinicalRepository repository, Cli
             return Error.Forbidden("note.not_author", "Only the author can change a note.");
         }
 
+        if (request.ExpectedVersion is { } expected && note.RowVersion != expected)
+        {
+            return Error.PreconditionFailed("precondition.failed", "The note was changed since your copy. Reload and retry.");
+        }
+
         var edited = note.Edit(new SoapText(request.Subjective, request.Objective, request.Assessment, request.Plan));
-        return edited.IsFailure ? edited.Error! : NoteMapper.ToDto(note);
+        if (edited.IsFailure)
+        {
+            return edited.Error!;
+        }
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return NoteMapper.ToDto(note);
     }
 }
 
@@ -112,7 +135,7 @@ public sealed record SignNoteCommand(Guid NoteId) : ICommand<NoteDto>, IRequires
     public AuditDescriptor Describe(NoteDto response) => new("note.sign", "clinical_note", NoteId);
 }
 
-internal sealed class SignNoteCommandHandler(IClinicalRepository repository, ClinicalAccess access, ICurrentUser user, IClock clock)
+internal sealed class SignNoteCommandHandler(IClinicalRepository repository, ClinicalAccess access, ICurrentUser user, IClinicalUnitOfWork unitOfWork, IClock clock)
     : IRequestHandler<SignNoteCommand, NoteDto>
 {
     public async Task<Result<NoteDto>> Handle(SignNoteCommand request, CancellationToken cancellationToken)
@@ -129,7 +152,13 @@ internal sealed class SignNoteCommandHandler(IClinicalRepository repository, Cli
         }
 
         var signed = note.Sign(clock.UtcNow);
-        return signed.IsFailure ? signed.Error! : NoteMapper.ToDto(note);
+        if (signed.IsFailure)
+        {
+            return signed.Error!;
+        }
+
+        await unitOfWork.SaveChangesAsync(cancellationToken);
+        return NoteMapper.ToDto(note);
     }
 }
 

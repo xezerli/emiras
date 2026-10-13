@@ -9,6 +9,7 @@ public enum ErrorType
     Conflict,
     PreconditionFailed,
     Locked,
+    Gone,
     Failure,
 }
 
@@ -29,6 +30,9 @@ public sealed record Error(string Code, string Message, ErrorType Type)
     public static Error Conflict(string code, string message) => new(code, message, ErrorType.Conflict);
 
     public static Error PreconditionFailed(string code, string message) => new(code, message, ErrorType.PreconditionFailed);
+
+    /// <summary>Resurs/vəziyyət artıq mövcud deyil və bərpa olunmur (məs. sinxron kursoru köhnəlib: tam yenidən sinxron lazımdır).</summary>
+    public static Error Gone(string code, string message) => new(code, message, ErrorType.Gone);
 
     public static Error Locked(string code, string message) => new(code, message, ErrorType.Locked);
 }

@@ -13,6 +13,8 @@ using DentaCore.Patient.Application;
 using DentaCore.Patient.Infrastructure;
 using DentaCore.Scheduling.Application;
 using DentaCore.Scheduling.Infrastructure;
+using DentaCore.Sync.Application;
+using DentaCore.Sync.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +22,7 @@ builder.Services.AddPatientModule(builder.Configuration);
 builder.Services.AddSchedulingModule(builder.Configuration);
 builder.Services.AddClinicalModule(builder.Configuration);
 builder.Services.AddDashboardModule(builder.Configuration);
+builder.Services.AddSyncModule(builder.Configuration);
 builder.Services.AddAuditModule(builder.Configuration);
 builder.Services.AddJwtValidation(builder.Configuration);
 
@@ -276,6 +279,24 @@ app.MapGet("/v1/dashboard/summary", async (Guid? branchId, DateOnly? date, HttpC
     return (await sender.Send(new GetDashboardSummaryQuery(branchId, date), ct)).ToHttpResult(Results.Ok);
 }).RequireAuthorization();
 
+// Offline klientlər: pull (kursorla), snapshot (tam yükləmə), push (idempotent). Cavablar həssas klinik məlumat daşıyır: keşlənmir.
+var sync = app.MapGroup("/v1/sync").RequireAuthorization();
+sync.MapGet("/pull", async (long? cursor, int? limit, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    return (await sender.Send(new PullChangesQuery(cursor ?? 0, limit ?? SyncLimits.DefaultPullLimit), ct)).ToHttpResult(Results.Ok);
+});
+sync.MapGet("/snapshot", async (string entity, Guid? after, int? limit, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    return (await sender.Send(new SnapshotQuery(entity, after, limit ?? SyncLimits.MaxSnapshotLimit), ct)).ToHttpResult(Results.Ok);
+});
+sync.MapPost("/push", async (PushRequest body, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";
+    return (await sender.Send(new PushChangesCommand(body.DeviceId, body.Changes ?? []), ct)).ToHttpResult(Results.Ok);
+}).WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(5 * 1024 * 1024));
+
 await app.RunAsync();
 
 // If-Match: "3" (ETag) və ya 3
@@ -284,6 +305,8 @@ static bool TryParseIfMatch(Microsoft.Extensions.Primitives.StringValues header,
     version = 0;
     return header.Count == 1 && int.TryParse(header[0]?.Trim('"'), NumberStyles.None, CultureInfo.InvariantCulture, out version);
 }
+
+internal sealed record PushRequest(Guid DeviceId, IReadOnlyList<PushChangeInput>? Changes);
 
 internal sealed record RegisterPatientRequest(
     Guid BranchId,

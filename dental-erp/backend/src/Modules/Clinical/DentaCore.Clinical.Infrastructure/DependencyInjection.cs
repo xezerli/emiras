@@ -4,6 +4,7 @@ using DentaCore.BuildingBlocks.Infrastructure.Outbox;
 using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
 using DentaCore.Clinical.Application;
 using DentaCore.Clinical.Infrastructure.Persistence;
+using DentaCore.Sync.Contracts;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<IModuleUnitOfWork>(sp => sp.GetRequiredService<ClinicalDbContext>());
         services.AddScoped<IClinicalRepository, ClinicalRepository>();
         services.AddScoped<ClinicalAccess>();
+        services.AddScoped<ISyncEntityHandler, ClinicalNoteSyncHandler>();   // offline SOAP qeydləri (Sync modulu bunu tapır)
         return services;
     }
 }

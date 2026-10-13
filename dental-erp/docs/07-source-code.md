@@ -12,7 +12,7 @@
 | 5b | Billing (qiymət siyahısı, faktura, ödəniş, kassa smeni, refund) + prosedur→qaralama faktura consumer-i | ✅ Tamamlandı |
 | 6 | Notify (SignalR canlı bildirişlər) + Gateway (YARP) | ✅ Tamamlandı |
 | 7a | Audit publisher (outbox) + Dashboard (Redis keşi) | ✅ Tamamlandı |
-| 7b | Sync (offline pull/push, konflikt həlli) | |
+| 7b | Sync (offline pull/snapshot/push, konflikt həlli) | ✅ Tamamlandı |
 | 7c | Elasticsearch indexer + axtarış | |
 | 8 | Frontend (Next.js): Design System, auth, əsas ekranlar | |
 
@@ -547,4 +547,72 @@ Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real Ra
 - **Audit axınının istehlakçısı hələ yoxdur** (indexer 7c-dədir); outbox sətirləri 7 gün sonra təmizlənir.
 - Əvvəlki dilimlərin qalan məhdudiyyətləri qüvvədə qalır.
 
-> Növbəti dilim: **7b Sync** (mobil/desktop üçün offline pull/push, konflikt həlli), sonra **7c Elasticsearch indexer**. Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 7b: Sync (offline klientlər)
+
+### Nə yazıldı
+
+| Hissə | Məzmun |
+|---|---|
+| `T011_sync.sql` | `change_log.xid`, `sync_state`, `sync_client_changes` |
+| `Sync.Contracts` | `ISyncEntityHandler`, `SyncChangeRequest`, `SyncApplyOutcome` (Applied / Conflict / Rejected) |
+| `Sync.Application` | `PullChangesQuery`, `SnapshotQuery`, `PushChangesCommand` (+ validator, audit) |
+| `Sync.Infrastructure` | `SqlSyncReader`, `SyncEntities` (obyekt xəritəsi), `SqlClientChangeStore` |
+| `Clinical.Infrastructure` | `ClinicalNoteSyncHandler`: offline SOAP qeydləri modulun öz əmrləri ilə |
+| ClinicCore host | `GET /v1/sync/pull`, `GET /v1/sync/snapshot`, `POST /v1/sync/push` (Gateway marşrutu əlavə olundu) |
+| `Result`/HTTP | yeni `ErrorType.Gone` → **410** |
+
+### Ən vacib qərar: kursor seq deyil, tranzaksiya sərhədidir
+
+`change_log.seq` **commit sırasını əks etdirmir**: iki paralel tranzaksiyadan kiçik seq-i alan sonra commit edə bilər. Klient böyük seq-ə qədər oxuyubsa, gec commit olan dəyişiklik **səssizcə və həmişəlik itərdi** (offline sinxronun ən təhlükəli xətası). Ona görə:
+
+- Hər jurnal sətri tranzaksiya id-sini (`xid`) daşıyır. Pull yalnız `xid < pg_snapshot_xmin(...)` olan sətirləri qaytarır, yəni **bütün köhnə tranzaksiyaları bitmiş** hissəni. Kursor həmin `xid` sərhədidir və klient onu olduğu kimi saxlayır.
+- Səhifə `xid` sərhədindən kəsilir, bir tranzaksiyanın sətirləri bölünmür (limitdən böyük tranzaksiya bütöv qaytarılır).
+- Test bunu dəqiq təqlid edir: yavaş tranzaksiya açıq ikən sonrakı tranzaksiya commit olur; birinci pull heç birini vermir (kursor yerində qalır), yavaş commit olduqdan sonra ikinci pull **hər ikisini** gətirir. Mutasiya yoxlaması (horizon şərti çıxarılanda) bu testi qırır.
+- OpenAPI-də `since/lastSeq` əvəzinə `cursor` istifadə olunur; `seq` yalnız səhifə daxilində sıralama üçündür.
+
+### Pull / snapshot
+
+- **Cari vəziyyət oxunur, jurnaldakı köhnə məzmun yox**: hər dəyişən sətir üçün cədvəl yenidən oxunur (istifadəçinin icazə və scope-u ilə), eyni obyektin bir pəncərədəki çoxlu dəyişikliyi **son vəziyyətə** yığılır.
+- **Silinmə**: sətir yoxdursa və ya soft-delete olunubsa `op=D` nişanı gedir. **Scope xaricindəki sətir** üçün heç nə göndərilmir (nişan də yox: başqa filialın id-si sızmır).
+- **Scope eyni qaydalarla**: `tenant` hamısı, `branch` yalnız öz filialları, `own` yalnız yaratdığı və ya (ləğv olunmamış qəbulla) baxdığı pasiyentlər; klinik qaralamalar yalnız müəllifə, imzalananlar giriş hüququ olana. İcazəsi olmayan obyekt cavabda yoxdur.
+- **Cihaza getməyən sahələr**: telefon, e-poçt, FIN, ünvan, pasiyent qeydləri açıq siyahıya daxil deyil (itirilmiş cihazdan sızma səthi azalır). Sinxron olunan obyektlər: `branches`, `rooms`, `patients`, `appointments`, `clinical_notes`, `services`. `users` və maliyyə cədvəlləri sinxron olunmur.
+- **410 (tam yenidən sinxron)**: kursor təmizlənmiş jurnaldan köhnədirsə (`sync_state.change_log_purged_through`, saatlıq maintenance 30 gündən köhnə sətirləri silib sərhədi yazır) və ya serverdən irəlidirsə (bərpa olunmuş ehtiyat nüsxə). `/sync/snapshot` obyekti id üzrə səhifələyir; **ilk** çağırışın kursoru saxlanıb pull ondan davam edir (snapshot zamanı olan dəyişikliklər təkrar gələ bilər, tətbiq idempotentdir).
+
+### Push
+
+- **Heç vaxt cədvələ birbaşa yazmır.** Hər dəyişiklik modulun öz əmri ilə gedir (`CreateNoteCommand`, `EditNoteCommand`): icazə, pasiyent scope-u, açıq vizit qaydası, "yalnız müəllif", "imzalanmış qeyd dəyişməzdir" və audit adi API ilə eynidir. Yeni obyektin id-sini klient yaradır.
+- **Idempotentlik**: `clientChangeId` istifadəçi üzrə unikaldır; nəticə (applied / conflict / rejected) `sync_client_changes`-də saxlanır, təkrar göndərmə eyni cavabı qaytarır. Başqa istifadəçinin `clientChangeId`-si rədd olunur. Gözlənilməz istisna nəticə kimi yazılmır (təkrar göndərilə bilər).
+- **Konflikt**: `baseVersion` serverlə uyğun deyilsə `conflicts` qaytarılır (`serverVersion`, `serverData`), `resolution: needs_manual`. Klinik mətn avtomatik birləşdirilmir; klient iki versiyanı həkimə göstərir. Mətn serverdəkinə **bərabərdirsə** (cavab itib və ya iki tərəf eyni nəticəyə gəlib) konflikt deyil, `applied` sayılır.
+- **Qadağalar**: `clinical_notes` silinmir (`note.not_deletable`), `patients`/`invoices` və s. oflayn yazılmır (`sync.entity_not_writable`), U üçün `baseVersion` məcburidir.
+- Audit: `sync.push` (cihaz id-si, applied/conflicts/rejected sayları; klinik məzmun yox).
+
+### Yan düzəlişlər
+
+- Qeyd əmrləri (`CreateNote`, `EditNote`, `SignNote`) DTO-nu **saxlamadan əvvəl** map edirdi, ona görə API **köhnə `rowVersion`** (yeni qeyddə 0) qaytarırdı. İndi saxlanır, sonra map olunur. Offline klient üçün bu kritikdir: növbəti redaktənin `baseVersion`-u bundan götürülür.
+- `CreateNoteCommand.ClientId` və `EditNoteCommand.ExpectedVersion` əlavə olundu (adi API üçün null).
+
+### Testlər (597 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Sync.UnitTests` | 13 | Push orkestrasiyası: nəticələrin siyahılara bölünməsi, replay, başqa istifadəçinin id-si, dəstəklənməyən obyekt qeyd olunmur, istisna yayılır, validator |
+| `Sync.IntegrationTests` | 32 | Real PostgreSQL: I/U/D və cari data, silinmə nişanları, həssas sahələrin olmaması, yığılma, kursorla səhifələmə (təkrar və buraxılma yoxdur), böyük tranzaksiya, **gec commit itmir**, filial/own/icazə scope-ları, scope xaricində nişan yoxdur, tenant izolyasiyası, 410, snapshot səhifələməsi və pull ilə davamı; push: yaratma, replay, redaktə, konflikt, konvergensiya, qaydalar (imzalı, başqa müəllif, silmə), icazə/scope, dəstəklənməyən obyekt, qarışıq dəst, yanlış sorğular, audit, pull ilə dövrə |
+| `Workers.IntegrationTests` (+1) | 15 | Maintenance köhnə jurnalı silir və sərhədi yazır (geri çəkilmir) |
+| `Gateway.IntegrationTests` (+1) | 37 | `/v1/sync/*` marşrutu |
+
+**Mutasiya yoxlamaları** (kod bərpa olundu): horizon şərti çıxarılanda "gec commit itmir" testi; qaralama görünürlüyü çıxarılanda own-scope testi; "silinib" ilə "scope xaricində"ni ayırma çıxarılanda 3 test qırılır.
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Offline yazıla bilən yeganə obyekt SOAP qeydidir.** Randevu, odontoqram, pasiyent redaktəsi və s. offline yazılmır (hər biri üçün konflikt qaydası ayrıca qərardır). Mexanizm genişlənməyə hazırdır: modul `ISyncEntityHandler` qeydiyyatdan keçirir.
+- **Konflikt həlli yalnız `needs_manual`-dır.** Sahə səviyyəli avtomatik birləşmə yoxdur (server `baseVersion` tarixçəsini saxlamır).
+- **Pull yalnız ilk 6 obyekti əhatə edir** (visits, allergies, plans, odontogram, invoices yoxdur). Cədvəl `SyncEntities`-ə əlavə olunur; hər biri üçün sahə siyahısı və scope qaydası ayrıca yazılmalıdır.
+- **Scope-un sonradan dəyişməsi**: pasiyent başqa filiala keçərsə köhnə filialın cihazlarındakı surət silinmir (nişan göndərilmir). Cihaz idarəetməsi (uzaqdan silmə) Mərhələ 9-un təhlükəsizlik siyahısındadır.
+- **`deviceId` yoxlanmır** (`user_devices` ilə bağlı deyil), yalnız audit və idempotentlik üçün istifadə olunur.
+- **Cihazdakı məlumat PHI-dir** (klinik qeydlər daxil): mobil/desktop klient lokal bazanı şifrələməlidir (Flutter/MAUI mərhələsində).
+- **Push sinxrondur və ardıcıldır** (dəstdə ≤200 dəyişiklik). Çox böyük offline növbə üçün klient dəstləri bölür.
+- **`change_log` yalnız trigger qoşulan cədvəllərdə dolur**; yeni sinxron cədvəl əlavə edəndə `attach_standard_triggers` unudulmamalıdır.
+
+> Növbəti dilim: **7c Elasticsearch indexer və axtarış** (`audit.recorded` və pasiyent/qeyd axtarışı). Davam etmək üçün **"Davam et"** yazın.

@@ -296,7 +296,7 @@ public class NoteAndPrescriptionHandlerTests
     private readonly World _w = new();
     private readonly Guid _author = Guid.NewGuid();
 
-    private CreateNoteCommandHandler Create(Guid? user = null) => new(_w.Repo, _w.Access(World.Doctor(user ?? _author)), World.Doctor(user ?? _author), _w.Clock);
+    private CreateNoteCommandHandler Create(Guid? user = null) => new(_w.Repo, _w.Access(World.Doctor(user ?? _author)), World.Doctor(user ?? _author), new FakeUow(), _w.Clock);
 
     [Fact]
     public async Task Only_the_author_edits_and_signs_and_other_clinicians_see_signed_notes_only()
@@ -306,8 +306,8 @@ public class NoteAndPrescriptionHandlerTests
         var colleague = Guid.NewGuid();
         var colleagueAccess = _w.Access(World.Doctor(colleague));
 
-        var edit = await new EditNoteCommandHandler(_w.Repo, colleagueAccess, World.Doctor(colleague)).Handle(new EditNoteCommand(noteId, "x", null, null, null), CancellationToken.None);
-        var sign = await new SignNoteCommandHandler(_w.Repo, colleagueAccess, World.Doctor(colleague), _w.Clock).Handle(new SignNoteCommand(noteId), CancellationToken.None);
+        var edit = await new EditNoteCommandHandler(_w.Repo, colleagueAccess, World.Doctor(colleague), new FakeUow()).Handle(new EditNoteCommand(noteId, "x", null, null, null), CancellationToken.None);
+        var sign = await new SignNoteCommandHandler(_w.Repo, colleagueAccess, World.Doctor(colleague), new FakeUow(), _w.Clock).Handle(new SignNoteCommand(noteId), CancellationToken.None);
         var list = new ListNotesQueryHandler(_w.Repo, colleagueAccess, World.Doctor(colleague));
         var before = await list.Handle(new ListNotesQuery(_w.Patient.Id), CancellationToken.None);
 
@@ -315,7 +315,7 @@ public class NoteAndPrescriptionHandlerTests
         Assert.Equal("note.not_author", sign.Error!.Code);
         Assert.Empty(before.Value);
 
-        await new SignNoteCommandHandler(_w.Repo, _w.Access(World.Doctor(_author)), World.Doctor(_author), _w.Clock).Handle(new SignNoteCommand(noteId), CancellationToken.None);
+        await new SignNoteCommandHandler(_w.Repo, _w.Access(World.Doctor(_author)), World.Doctor(_author), new FakeUow(), _w.Clock).Handle(new SignNoteCommand(noteId), CancellationToken.None);
         Assert.Single((await list.Handle(new ListNotesQuery(_w.Patient.Id), CancellationToken.None)).Value);
     }
 

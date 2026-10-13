@@ -601,20 +601,41 @@ paths:
     get:
       operationId: getSyncPull
       tags: [Sync]
-      summary: Offline klient üçün dəyişikliklər (change_log seq üzrə)
+      summary: Offline klient üçün dəyişikliklər. Kursor tranzaksiya sərhədidir (seq yox), klient onu olduğu kimi saxlayır
+      description: >
+        Yalnız tranzaksiyası bitmiş dəyişikliklər qaytarılır; cavabdakı cursor növbəti sorğuda göndərilir. İstifadəçinin icazə və scope-undan
+        kənar sətirlər göndərilmir. Silinmiş sətirlər op=D nişanı ilə gəlir. Şifrələnmiş və yüksək həssas sahələr (telefon, e-poçt, FIN, ünvan, qeydlər) heç vaxt daxil edilmir.
       parameters:
-        - { name: since, in: query, required: true, schema: { type: integer, format: int64 }, description: Son alınmış seq (0 = tam sync) }
-        - { name: limit, in: query, schema: { type: integer, default: 500, maximum: 2000 } }
+        - { name: cursor, in: query, schema: { type: integer, format: int64, default: 0, minimum: 0 }, description: 'Əvvəlki cavabdakı cursor (0 = başlanğıc)' }
+        - { name: limit, in: query, schema: { type: integer, default: 500, minimum: 1, maximum: 2000 } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPullResponse' } } } }
-        '410': { description: 'since çox köhnədir, tam re-sync lazımdır', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '410': { description: 'Kursor köhnədir (jurnal təmizlənib) və ya serverdən irəlidir (bərpa olunmuş bazа). /sync/snapshot ilə tam yenidən sinxron lazımdır', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+  /sync/snapshot:
+    get:
+      operationId: getSyncSnapshot
+      tags: [Sync]
+      summary: Bir obyektin tam yüklənməsi (id üzrə səhifələnir). İLK çağırışın cursor-u saxlanır, sonra /sync/pull ondan davam edir
+      parameters:
+        - { name: entity, in: query, required: true, schema: { type: string, enum: [branches, rooms, patients, appointments, clinical_notes, services] } }
+        - { name: after, in: query, schema: { type: string, format: uuid }, description: 'Əvvəlki cavabdakı nextAfter' }
+        - { name: limit, in: query, schema: { type: integer, default: 1000, minimum: 1, maximum: 1000 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SyncSnapshotResponse' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /sync/push:
     post:
       operationId: postSyncPush
       tags: [Sync]
-      summary: Offline dəyişiklikləri göndər (idempotent; konfliktlər cavabda qaytarılır)
+      summary: Offline dəyişiklikləri göndər. Hər dəyişiklik modulun öz əmri ilə tətbiq olunur (icazə, scope, domen qaydaları, audit adi API ilə eynidir)
+      description: >
+        Hələlik yazıla bilən obyekt yalnız clinical_notes-dur (I və U; D qadağandır). clientChangeId idempotentlik açarıdır: təkrar göndərmə eyni nəticəni qaytarır.
+        Konflikt avtomatik birləşdirilmir (klinik mətn): klient serverData ilə öz versiyasını həkimə göstərir.
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPushRequest' } } } }
-      responses: { '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPushResponse' } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPushResponse' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
 
   /admin/users:
     get:
@@ -1117,28 +1138,47 @@ components:
       type: object
       required: [entity, entityId, op]
       properties:
-        seq: { type: integer, format: int64 }
+        seq: { type: integer, format: int64, description: 'Səhifə daxilində sıralama üçün (kursor deyil)' }
         entity: { type: string }
         entityId: { type: string, format: uuid }
         op: { type: string, enum: [I, U, D] }
-        baseVersion: { type: integer, description: Klientin əsaslandığı rowVersion (push zamanı) }
-        data: { type: object, additionalProperties: true }
-        clientChangeId: { type: string, format: uuid, description: Push idempotentliyi üçün }
+        rowVersion: { type: [integer, 'null'], description: 'Serverdəki cari versiya (pull)' }
+        data: { type: [object, 'null'], additionalProperties: true, description: 'Cari məzmun; D üçün null' }
     SyncPullResponse:
       type: object
       properties:
         changes: { type: array, items: { $ref: '#/components/schemas/SyncChange' } }
-        lastSeq: { type: integer, format: int64 }
+        cursor: { type: integer, format: int64 }
         hasMore: { type: boolean }
+    SyncSnapshotResponse:
+      type: object
+      properties:
+        entity: { type: string }
+        items: { type: array, items: { type: object, properties: { entityId: { type: string, format: uuid }, rowVersion: { type: integer }, data: { type: object, additionalProperties: true } } } }
+        nextAfter: { type: [string, 'null'], format: uuid }
+        cursor: { type: integer, format: int64, description: 'Hər çağırışda cari; klient YALNIZ ilkini saxlayır' }
+    SyncPushChange:
+      type: object
+      required: [entity, entityId, op, clientChangeId]
+      properties:
+        entity: { type: string, enum: [clinical_notes] }
+        entityId: { type: string, format: uuid, description: 'Yeni obyektdə klientin özü yaratdığı id' }
+        op: { type: string, enum: [I, U, D] }
+        baseVersion: { type: integer, description: 'U üçün məcburi: klientin əsaslandığı rowVersion' }
+        data: { type: object, additionalProperties: true }
+        clientChangeId: { type: string, format: uuid, description: 'Idempotentlik açarı (istifadəçi üzrə unikal)' }
     SyncPushRequest:
       type: object
       required: [deviceId, changes]
-      properties: { deviceId: { type: string, format: uuid }, changes: { type: array, items: { $ref: '#/components/schemas/SyncChange' } } }
+      properties:
+        deviceId: { type: string, format: uuid }
+        changes: { type: array, minItems: 1, maxItems: 200, items: { $ref: '#/components/schemas/SyncPushChange' } }
     SyncPushResponse:
       type: object
       properties:
-        applied: { type: array, items: { type: string, format: uuid }, description: Tətbiq olunmuş clientChangeId-lər }
-        conflicts: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entity: { type: string }, entityId: { type: string, format: uuid }, serverVersion: { type: integer }, serverData: { type: object, additionalProperties: true }, resolution: { type: string, enum: [merged, needs_manual] } } } }
+        applied: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entityId: { type: string, format: uuid }, rowVersion: { type: [integer, 'null'] } } } }
+        conflicts: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entity: { type: string }, entityId: { type: string, format: uuid }, serverVersion: { type: [integer, 'null'] }, serverData: { type: [object, 'null'], additionalProperties: true }, resolution: { type: string, enum: [needs_manual] } } } }
+        rejected: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, code: { type: string }, message: { type: [string, 'null'] } } } }
     UserSummary:
       type: object
       properties: { id: { type: string, format: uuid }, fullName: { type: string }, specialty: { type: string }, roles: { type: array, items: { type: string } }, status: { type: string } }
