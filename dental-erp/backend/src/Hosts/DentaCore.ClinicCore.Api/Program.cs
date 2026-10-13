@@ -7,6 +7,8 @@ using DentaCore.BuildingBlocks.Infrastructure.Http;
 using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
 using DentaCore.Clinical.Application;
 using DentaCore.Clinical.Infrastructure;
+using DentaCore.Dashboard.Application;
+using DentaCore.Dashboard.Infrastructure;
 using DentaCore.Patient.Application;
 using DentaCore.Patient.Infrastructure;
 using DentaCore.Scheduling.Application;
@@ -17,6 +19,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddPatientModule(builder.Configuration);
 builder.Services.AddSchedulingModule(builder.Configuration);
 builder.Services.AddClinicalModule(builder.Configuration);
+builder.Services.AddDashboardModule(builder.Configuration);
 builder.Services.AddAuditModule(builder.Configuration);
 builder.Services.AddJwtValidation(builder.Configuration);
 
@@ -266,6 +269,12 @@ clinical.MapPost("/prescriptions", async (PrescriptionRequest body, ISender send
 });
 clinical.MapGet("/procedure-codes", async (string? q, ISender sender, CancellationToken ct) =>
     (await sender.Send(new ListProcedureCodesQuery(q), ct)).ToHttpResult(Results.Ok));
+
+app.MapGet("/v1/dashboard/summary", async (Guid? branchId, DateOnly? date, HttpContext http, ISender sender, CancellationToken ct) =>
+{
+    http.Response.Headers.CacheControl = "no-store";   // maliyyə göstəriciləri brauzer/proxy keşinə düşməsin
+    return (await sender.Send(new GetDashboardSummaryQuery(branchId, date), ct)).ToHttpResult(Results.Ok);
+}).RequireAuthorization();
 
 await app.RunAsync();
 

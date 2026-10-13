@@ -30,6 +30,19 @@ internal sealed class SqlAuditTrail(ITenantDataSources dataSources, ITenantConte
                (SELECT hash FROM prev),
                digest(coalesce((SELECT hash FROM prev), '\x'::bytea) || convert_to({Canonical("n")}, 'UTF8'), 'sha256')
         FROM n
+        RETURNING id
+        """;
+
+    /// <summary>
+    /// Audit hadisəsi eyni tranzaksiyada outbox-a yazılır (audit.recorded): audit olmadan hadisə, hadisəsiz audit yaranmır.
+    /// Yük PHI-siz qalır (audit_log-un özü kimi: kim, nə, hansı obyekt, hansı sahələr).
+    /// </summary>
+    private const string OutboxSql = """
+        INSERT INTO outbox_messages(type, routing_key, payload, occurred_at)
+        VALUES ('AuditRecorded', 'audit.recorded',
+                jsonb_build_object('auditId', $1::bigint, 'action', $2::text, 'entity', $3::text, 'entityId', $4::uuid,
+                                   'userId', $5::uuid, 'occurredAt', $6::text, 'details', $7::jsonb),
+                $8::timestamptz)
         """;
 
     private static readonly string VerifySql = $"""
@@ -62,7 +75,18 @@ internal sealed class SqlAuditTrail(ITenantDataSources dataSources, ITenantConte
         insert.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)record.EntityId ?? DBNull.Value });
         insert.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Inet, Value = ParseIp(record.Ip) });
         insert.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Jsonb, Value = (object?)record.DetailsJson ?? DBNull.Value });
-        await insert.ExecuteNonQueryAsync(cancellationToken);
+        var auditId = (long)(await insert.ExecuteScalarAsync(cancellationToken) ?? throw new InvalidOperationException("Audit insert returned no id."));
+
+        await using var publish = new NpgsqlCommand(OutboxSql, connection, transaction);
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Bigint, Value = auditId });
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = record.Action });
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = (object?)record.Entity ?? DBNull.Value });
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)record.EntityId ?? DBNull.Value });
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Uuid, Value = (object?)record.UserId ?? DBNull.Value });
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Text, Value = record.OccurredAt.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture) });
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.Jsonb, Value = (object?)record.DetailsJson ?? DBNull.Value });
+        publish.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlDbType.TimestampTz, Value = record.OccurredAt.UtcDateTime });
+        await publish.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 

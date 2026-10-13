@@ -11,7 +11,9 @@
 | 5a | Mesajlaşma: Outbox publisher + inbox + consumer host (RabbitMQ), no-show consumer, tenant maintenance | ✅ Tamamlandı |
 | 5b | Billing (qiymət siyahısı, faktura, ödəniş, kassa smeni, refund) + prosedur→qaralama faktura consumer-i | ✅ Tamamlandı |
 | 6 | Notify (SignalR canlı bildirişlər) + Gateway (YARP) | ✅ Tamamlandı |
-| 7 | Audit publisher, Dashboard, Sync, Elasticsearch indexer | |
+| 7a | Audit publisher (outbox) + Dashboard (Redis keşi) | ✅ Tamamlandı |
+| 7b | Sync (offline pull/push, konflikt həlli) | |
+| 7c | Elasticsearch indexer + axtarış | |
 | 8 | Frontend (Next.js): Design System, auth, əsas ekranlar | |
 
 ---
@@ -497,4 +499,52 @@ Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real Ra
 - **Hub-da sərbəst abunə yoxdur**: klient qrup seçə bilmir (bilərəkdən). Məsələn, "bu pasiyentin kartını izləyirəm" kimi dar abunələr lazım olsa icazə yoxlaması ilə əlavə olunmalıdır.
 - Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Testcontainers, Elasticsearch, `POST /invoices` idempotentliyi) qüvvədə qalır.
 
-> Növbəti dilim: **7 Audit publisher, Dashboard, Sync və Elasticsearch indexer**. Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 7a: Audit publisher və Dashboard
+
+### Audit publisher
+
+- `SqlAuditTrail` audit sətrini yazdığı **eyni tranzaksiyada** `audit.recorded` hadisəsini outbox-a yazır (`INSERT … RETURNING id`, sonra `outbox_messages`). Audit olmadan hadisə, hadisəsiz audit yaranmır; audit uğursuz olarsa hadisə də geri qaytarılır. Hash zənciri toxunulmaz qalır (outbox sətri zəncirdən kənardadır).
+- Yük PHI-sizdir və dəqiq bu sahələrdən ibarətdir: `auditId, action, entity, entityId, userId, occurredAt, details`. Müqavilə: `Audit.Contracts.AuditRecordedV1`. İstehlakçı: Elasticsearch indexer (7c).
+- Test: bir faktura axınında audit sətirlərinin sayı = `audit.recorded` hadisələrinin sayı, hər hadisənin `auditId`-si `audit_log`-dakı eyni `action` ilə uyğundur, yükün açar dəsti sabitdir.
+
+### Dashboard
+
+`GET /v1/dashboard/summary?branchId=&date=` (ClinicCore host-unda, `report:read`). Gateway marşrutu əlavə olundu. Yeni `Modules/Dashboard` (Application + Infrastructure).
+
+| Göstərici | Qayda |
+|---|---|
+| `appointmentsToday` | gün ərzində başlayan randevular; `total` ləğv/yenidən planlanmışı saymır; `completed`, `noShow`, `waiting` (= `checked_in`) |
+| `revenueToday`, `revenueMonth` | qəbul olunan ödənişlər − geri qaytarmalar, ödəniş tarixinə görə; ay = ayın əvvəlindən seçilən günün sonunadək |
+| `outstandingDebt` | rəsmiləşdirilmiş və qismən ödənilmiş fakturaların qalığı (tarixdən asılı deyil, cari borc) |
+| `newPatients` | həmin gün yaradılan (silinməmiş) pasiyentlər |
+| `topServices`, `topProviders` | ayın rəsmiləşdirilmiş fakturalarının sətirləri üzrə gəlir, ilk 5 |
+| `rooms` | aktiv otaqlar: `in_progress` randevusu varsa `occupied`, yoxsa `free` |
+| `revenueSeries` | son 30 yerli gün, boş günlər 0, geri qaytarma günləri mənfi ola bilər |
+
+**Qərarlar**
+- **Gün klinikanın qurşağında hesablanır** (`Dashboard:TimeZone`, default `Asia/Baku`): `[gün 00:00, növbəti gün 00:00)`. UTC ilə hesablansaydı Bakıda gecə yarısından sonrakı randevu və ödənişlər səhv günə düşərdi (test sərhəd dəqiqələrini yoxlayır: 00:00 və 23:29 daxil, əvvəlki gün 23:29 və sonrakı gün 00:00 xaric).
+- **Scope**: `tenant` hamısını (və ya seçilmiş filialı), `branch` yalnız öz filiallarını görür; başqa filialın id-si 404 qaytarır (filial varlığı sızmır); `own` scope və icazəsizlik 403; gələcək tarix 422; filialı olmayan `branch` scope 403.
+- **Keş**: `IDistributedCache`, **30 san** TTL. `ConnectionStrings:Redis` verilibsə Redis, yoxsa proses yaddaşı. Açar `dash:<tenant sxemi>:<gün>:<filial dəsti>`: bir tenant-ın nəticəsi başqasına verilmir (mutasiya testi: tenant açardan çıxarılanda 2 test qırılır). **Keş əlçatmaz olarsa sorğu birbaşa DB-yə düşür**, xəta qaytarmır. Cavab `Cache-Control: no-store`: maliyyə rəqəmləri brauzer/proxy keşinə düşmür.
+- **Oxuma modeli**: Scheduling, Billing və Patient cədvəllərini yalnız oxuyur (hesabat konteksti), sorğular bir bağlantıda, filial filtri hamısında eyni parametrdir.
+
+### Testlər (550 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Dashboard.UnitTests` | 10 | Scope həlli (tenant/branch/`*`/boş/own), yad filial, gələcək tarix, yerli "bu gün" (UTC 21:30 = Bakıda növbəti gün) |
+| `Dashboard.IntegrationTests` | 11 | Real PostgreSQL: bütün göstəricilər əl ilə hesablanmış rəqəmlərlə (2 həkim, 3 faktura, geri qaytarma, keçən ay), 30 günlük seriya (kəbisə fevralı, kənar ödəniş), qurşaq sərhədləri, boş filial, filial scope-u, icazə/anonim/yanlış giriş, tenant izolyasiyası; keş: TTL daxilində keşdən, filial/tenant üzrə ayrı açar, müddət bitəndə yenilənmə, **real Redis**-də açar və TTL, Redis əlçatmaz olanda işləməyə davam |
+| `Billing.IntegrationTests` (+1) | 37 | Hər audit qeydi üçün tam bir `audit.recorded`, yük açarları |
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Keşin köhnəlməsi 30 saniyəyə qədərdir**, hadisə ilə ləğvetmə yoxdur. Canlı yeniləmə üçün klient Notify (SignalR) bildirişi ilə yenidən sorğu göndərə bilər.
+- **Tək valyuta fərziyyəsi**: məbləğlər valyuta çevrilmədən toplanır (tenant başına bir valyuta). Çox valyutalı tenant üçün valyuta üzrə bölgü lazımdır.
+- **`rooms.state` yalnız `free/occupied`**: `cleaning` üçün məlumat mənbəyi (sterilizasiya statusu) yoxdur.
+- **Dashboard sorğuları canlı cədvəllərdən oxuyur** (8 sorğu). Çox böyük tenant üçün yenidən hesablanan günlük aqreqat cədvəli və ya replika oxuması lazım ola bilər; ölçmə Mərhələ 9-da.
+- **Redis üçün qısa timeout-lar** bağlantı sətrində verilməlidir (`connectTimeout`, `syncTimeout`); əks halda əlçatmaz Redis hər sorğunu saniyələrlə ləngidə bilər (test qısa timeout-la işləyir).
+- **Audit axınının istehlakçısı hələ yoxdur** (indexer 7c-dədir); outbox sətirləri 7 gün sonra təmizlənir.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri qüvvədə qalır.
+
+> Növbəti dilim: **7b Sync** (mobil/desktop üçün offline pull/push, konflikt həlli), sonra **7c Elasticsearch indexer**. Davam etmək üçün **"Davam et"** yazın.

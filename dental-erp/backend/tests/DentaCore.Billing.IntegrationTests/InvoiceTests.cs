@@ -285,6 +285,29 @@ public sealed class InvoiceTests(BillingApiFixture f)
         Assert.True(chain.IsIntact, chain.ToString());
     }
 
+    [IntegrationFact]
+    public async Task Every_audit_entry_is_published_to_the_outbox_in_the_same_transaction_without_pii()
+    {
+        var (cashier, _) = await f.CashierAsync(f.BranchA);
+        var patient = await f.SeedPatientAsync(f.BranchA);
+        var id = await IssuedInvoiceAsync(cashier, patient, f.BranchA, 25m);
+        await OpenShiftAsync(cashier, f.BranchA);
+        await PayAsync(cashier, id, "cash", 25m);
+
+        var rows = await f.Db.ScalarAsync<long>(Demo, "SELECT count(*) FROM audit_log WHERE entity_id = $1", id);
+        var published = await f.Db.ScalarAsync<long>(Demo, "SELECT count(*) FROM outbox_messages WHERE routing_key = 'audit.recorded' AND payload->>'entityId' = $1", id.ToString());
+        Assert.True(rows >= 3);
+        Assert.Equal(rows, published);   // audit qeydi başına tam bir hadisə
+
+        // Hadisə audit_log sətri ilə uyğundur (auditId, action) və yalnız PHI-siz sahələr daşıyır
+        var mismatched = await f.Db.ScalarAsync<long>(
+            Demo, "SELECT count(*) FROM outbox_messages o JOIN audit_log a ON a.id = (o.payload->>'auditId')::bigint WHERE o.routing_key = 'audit.recorded' AND o.payload->>'entityId' = $1 AND o.payload->>'action' <> a.action", id.ToString());
+        Assert.Equal(0, mismatched);
+        var keys = await f.Db.ScalarAsync<string>(
+            Demo, "SELECT string_agg(DISTINCT k, ',' ORDER BY k) FROM outbox_messages o, jsonb_object_keys(o.payload) k WHERE o.routing_key = 'audit.recorded' AND o.payload->>'entityId' = $1", id.ToString());
+        Assert.Equal("action,auditId,details,entity,entityId,occurredAt,userId", keys);
+    }
+
     // ---------------- Database guarantees ----------------
     [IntegrationFact]
     public async Task Database_refuses_overpayment_and_payment_rewrites_even_when_the_application_is_bypassed()
