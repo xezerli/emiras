@@ -1,7 +1,7 @@
 # Mərhələ 9: Deployment (Dental Clinic ERP "DentaCore")
 
-> Status: ✅ Artefaktlar yazılıb və **mümkün qədər yoxlanılıb**; nəyin real icra olunduğu, nəyin olunmadığı §3-dədir. Bu mühitdə Docker daemon yoxdur, ona görə
-> **heç bir image qurulmayıb** və **GitHub Actions heç vaxt işləməyib**. Bunu oxuyub qərar verin.
+> Status: ✅ Artefaktlar yazılıb və yoxlanılıb; nəyin real icra olunduğu, nəyin olunmadığı §3-dədir. Bu mühitdə Docker daemon yoxdur, ona görə
+> **heç bir image qurulmayıb** (`release.yml` işləməyib). `ci.yml` və `codeql.yml` isə PR #1-də **real GitHub runner-lərdə işləyib və yaşıldır** (§3).
 > Növbəti: Mərhələ 10 (Documentation).
 
 ## 1. Nə çatdırılır
@@ -44,11 +44,18 @@ Xarici asılılıqlar (PostgreSQL 16, RabbitMQ 3.13, Redis 7, Elasticsearch 8.11
 | OTel Collector konfiqurasiyası | `otelcol-contrib validate` + **real Workers/Billing host-ları ilə OTLP axını**: Prometheus-da `dentacore_outbox_*`, `http_server_request_duration_seconds_*{service_name}` görünür | ✅ qaydalardakı metrik adları real çıxışdan təsdiqlənib (sayğacların sıfır nöqtəsi başlanğıcdan ixrac olunur: bu yoxlamada tapılan boşluq düzəldildi) |
 | `db/migrate.sh` | `db/test-migrate.sh` (real PG, 6 ssenari) | ✅ |
 | Backup / restore | `infra/backup/test-backup.sh` (real PG, 7 ssenari: tam və tək-tenant bərpa, yanlış açar, zədələnmə, saxta say) | ✅ |
-| GitHub Actions (`ci.yml`, `codeql.yml`, `release.yml`) | `actionlint` | ✅ sintaksis/ifadələr; **heç vaxt icra olunmayıb**, action-lar teq ilə (SHA ilə deyil) |
+| `ci.yml` + `codeql.yml` | **PR #1-də real runner-lərdə icra olundu**, son commit-də 9/9 yaşıl: API kontraktı, Backend (real PG/RabbitMQ/Redis/**Elasticsearch 8.11**: Search 26/26, Notify 14/14 daxil), Frontend, E2E, Təhlükəsizlik, Miqrasiya/ehtiyat nüsxə/Helm/Prometheus/Dockerfile lint/compose, CodeQL (C# + JS/TS) | ✅ |
+| `release.yml` | `actionlint` (+ shellcheck) | ⚠ **heç vaxt icra olunmayıb** (yalnız `main`/teqdə işləyir); action-lar teq ilə (SHA ilə deyil) |
 | Prometheus + Grafana + Collector compose profili | Yalnız konfiqurasiya sintaksisi | ⚠ qaldırılmayıb; dashboard JSON-u Grafana-da açılmayıb |
 | Trivy / CodeQL / cosign | CI ilk işə düşəndə `aquasecurity/trivy-action@0.28.0` teqi tapılmadı (job başlamadı): action əvəzinə birbaşa `aquasec/trivy:0.57.1` konteyneri çağırılır; konteyner teqi özü hələ təsdiqlənməyib | ⚠ |
 
-**İlk real deploy-da gözlənilən sürtünmə:** CI-nin ilk işə salınması çox güman ki, kiçik problemlər tapacaq (RabbitMQ `guest` loopback, ES yaddaşı, runner vaxtı). Bunlar gözlənilir, "hazırdır" demək olmaz.
+**CI-nin ilk real işə salınması 4 problem tapdı** (hamısı düzəldildi, lokal yoxlamalar bunları görə bilməzdi):
+1. `aquasecurity/trivy-action@0.28.0` teqi mövcud deyildi: Trivy birbaşa `aquasec/trivy` konteyneri ilə çağırılır.
+2. Runner-də `shellcheck` var, lokal `actionlint`-də yox idi (SC2015, SC2155): düzəldildi və lokal `shellcheck` quraşdırıldı.
+3. RabbitMQ `guest` istifadəçisi konteynerə port xəritəsi ilə qoşulanda rədd olunur (24 test düşdü; `loopback_users` ERL arqumenti kömək etmədi): `RABBITMQ_DEFAULT_USER/PASS` ilə adi istifadəçi.
+4. `DentaCore.TestSupport` `xunit` istinadı səbəbindən test layihəsi sayılırdı və boş testhost `dotnet test`-i exit 1 ilə bitirirdi (lokalda mən nəticəni `grep` ilə süzdüyümdən görünməmişdi): `IsTestProject=false`.
+
+Həmçinin: ardıcıl push-lar `cancel-in-progress` ilə köhnə run-ları ləğv edir; yaşıl nəticə yalnız ən son commit üçün sayılır.
 
 ### Bu mərhələdə əlavə olunan avtomatik testlər
 
@@ -149,7 +156,7 @@ Image tag-ları dəyişməzdir (`sha-…`); `:latest` chart testi ilə qadağand
 
 ## 10. Məlum boşluqlar (sıra ilə vacibliyə görə)
 
-1. **Heç bir image qurulmayıb, CI işləməyib, Helm klasterə qoyulmayıb.** İlk real deploy yeni problemlər tapacaq.
+1. **Heç bir image qurulmayıb (`release.yml` işləməyib), Helm klasterə qoyulmayıb.** CI-nin ilk işə salınması 4 problem tapdı (§3); image build və klaster deploy-u da yenilərini tapacaq.
 2. **PII açar rotasiyası yoxdur** və JWT üçün JWKS/rotasiya yoxdur.
 3. **PITR / WAL arxivi konfiqurasiya edilməyib.** Hazırkı RPO = ən son logical backup (default 24 saat). Saatlıq/dəqiqəlik RPO üçün pgBackRest və ya CloudNativePG `barmanObjectStore` lazımdır.
 4. **RTO ölçülməyib.** Bərpa sınağı kiçik bazada saniyələrlə bitdi; istehsal ölçüsündə vaxt məlum deyil.
