@@ -15,7 +15,7 @@
 | 7b | Sync (offline pull/snapshot/push, konflikt həlli) | ✅ Tamamlandı |
 | 7c | Elasticsearch indexer + axtarış (REAL Elasticsearch 8.11 ilə sınaqdan keçib) | ✅ Tamamlandı |
 | 8a | Frontend əsası: tipli API klienti, Design System, BFF auth, shell, dashboard, realtime | ✅ Tamamlandı |
-| 8b | Pasiyent / təqvim / maliyyə ekranları, DevSeed, Playwright e2e | |
+| 8b | Pasiyent / təqvim / maliyyə ekranları, DevSeed, `run-stack.sh`, Playwright e2e (real stack) | ✅ Tamamlandı |
 
 ---
 
@@ -733,4 +733,43 @@ Slice 1–7 tamdır: BuildingBlocks və Identity, Patient, Scheduling, Clinical,
 - Naviqasiya linkləri `/patients, /calendar, /billing` 8b-də yaradılır; hələ 404 verir.
 - Offline rejim və sync UI yoxdur (backend hazırdır).
 
-> Növbəti dilim: **8b**: pasiyent axtarışı/siyahısı/kartı/yaradılması, təqvim günü + check-in, faktura və ödəniş, DevSeed aləti və Playwright e2e (real stack). Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 8b: Əsas ekranlar, DevSeed və real-stack e2e
+
+### Ekranlar
+
+| Ekran | Qeyd |
+|---|---|
+| Pasiyentlər | Yazdıqca axtarış (300 ms debounce). **Elasticsearch**, `503/403` olarsa **avtomatik PostgreSQL axtarışına** keçir; kursorla "Daha çox". Qeydiyyat: `Idempotency-Key` formada sabit qalır, `409 patient.duplicate` xəta yox **qərardır** ("Yenə də yarat" → `confirmDuplicate=true`). Kart: ağır allergiya xəbərdarlığı, maskalı telefon/e-poçt/FİN, "Məlumatları göstər" **30 s-dən sonra avtomatik maskalanır** (hər açılış serverdə audit olunur). |
+| Təqvim | Günün qəbulları, vəziyyət simvol+mətnlə, statusa görə Gəldi / Gəlmədi / Ləğv. Server qaydaları (check-in pəncərəsi) xəta mesajı ilə göstərilir. |
+| Maliyyə | Faktura siyahısı + status filtri, kassa smeni kartı, faktura detalı, ödəniş. `PaymentAttempt`: bir cəhd = bir `Idempotency-Key`, şəbəkə xətasından sonra **eyni açarla** təkrar (iki dəfə çıxılmaz), yalnız uğurdan sonra yeni açar. Artıq məbləğ serverə getmir. |
+| Naviqasiya | İdarə panelinə icazəsi olmayan rol (qəbul, həkim) ilk əlçatan bölməyə yönləndirilir. |
+
+### Alətlər
+
+- `backend/tools/DentaCore.DevSeed`: platform + tenant sxemi, filial, kabinet, 3 istifadəçi (`admin@`, `reception@`, `doctor@<slug>.test`, Argon2id), həkim qrafiki, 2 xidmət. **Idempotentdir**; parol verilməsə təsadüfi yaradılır və yalnız stdout-a yazılır. `src/` arxitektura qaydalarından kənardadır, istehsalda işlədilmir.
+- `infra/dev/run-stack.sh start|stop`: Identity, ClinicCore, Billing, Notify, Workers, Gateway-i qaldırır (RSA/PII açarları yalnız `STACK_DIR`-də yaradılır, repoya düşmür). Redis və Elasticsearch könüllüdür (`DENTACORE_REDIS`, `DENTACORE_ES`).
+
+### E2E (Playwright, REAL backend: PostgreSQL + RabbitMQ + 6 servis)
+
+13 test: giriş/çıxış və cookie atributları, tokenin storage-da olmaması, rola görə naviqasiya, pasiyent yaratma/axtarış/maska, dublikat, qəbul + check-in, kassa smeni + hissə-hissə ödəniş, artıq ödənişin bloklanması, **axe (WCAG 2.2 AA, real kontrast) açıq və tünd temada bütün ekranlarda: pozuntu yoxdur**. Elasticsearch olmadan işləyir (fallback yolunu da sınayır).
+
+Işə salmaq: `infra/dev/run-stack.sh start` → `pnpm --filter @dentacore/web e2e:build` → `PLAYWRIGHT_CHROMIUM=/opt/pw-browsers/chromium pnpm --filter @dentacore/web e2e`. `API_ORIGIN` və `NEXT_PUBLIC_DEV_TENANT` Next **build** zamanı sabitlənir (rewrites + brauzer kodu).
+
+### E2E-nin tapdığı real səhvlər (mock-lu testlər tutmazdı)
+
+1. **`GET /auth/me` `branches` qaytarmırdı** (spesifikasiyada var idi): UI filialsız qalırdı, pasiyent yaratmaq mümkün deyildi. Backend düzəldildi (bütün-filial hüququ = bütün aktiv filiallar; filial-scope-lu istifadəçi yalnız öz filialları), 3 unit + 1 inteqrasiya testi. Spesifikasiyadan backend-in qaytarmadığı `specialty`/`locale` çıxarıldı.
+2. **OpenAPI ilə backend uyğunsuzluqları**: pasiyent siyahısı (`PatientListItem`), `Invoice` cavab sxemi (`items[].id/lineTotal`), `CashShift` sxemi. Düzəldildi, tiplər yenidən generasiya olundu.
+3. **`ApiError` kodu itirirdi**: `openapi-fetch` cavab gövdəsini artıq oxuduğu üçün `response.clone().json()` boş idi. `toApiError(error, response)` əlavə olundu (13 api-client testi).
+4. **SignalR `tenant.not_found`**: SignalR öz `fetch`-i ilə işləyir, `X-Tenant` başlığı getmirdi (dev-də). `headers` əlavə olundu.
+5. **Gateway auth limiti** (30/dəq/IP) e2e-ni 429-a salırdı: bu test mühitinin konfiqurasiyasıdır (`run-stack.sh`-də qaldırıldı), istehsal defaultu dəyişmədi.
+
+### Məlum məhdudiyyətlər
+
+- Təqvim gün siyahısıdır (həkim sütunları yox): həkim/kabinet adlarını verən endpoint hələ yoxdur (yalnız id var). Drag&drop, yeni qəbul formu, boş slot seçimi sonrakı iş.
+- Faktura yaratma/verilmə, geri qaytarma və smenin bağlanması UI-da yoxdur (API hazırdır).
+- E2E bazası təkrar işə salmalar arasında saxlanır: "smen yoxdur" xəta yolu yalnız təmiz bazada işləyir (smen artıq açıq olarsa test onu atlayır). Qəbul testi 5 dəqiqəlik təsadüfi slot seçir; gecə yarısına yaxın (< 2 saat) ilişə bilər.
+- E2E hələ CI-də deyil (Mərhələ 9). Elasticsearch ilə e2e ayrıca işə salınmayıb.
+
+> Növbəti: **Mərhələ 8 (Testing)**: bütün test pillələrinin (unit, inteqrasiya, e2e, yük, təhlükəsizlik) strategiyası, əhatə və boşluqların bağlanması. Sonra 9 (Deployment: CI, Docker, K8s) və 10 (Documentation). Davam etmək üçün **"Davam et"** yazın.

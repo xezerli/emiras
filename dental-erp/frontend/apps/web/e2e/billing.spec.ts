@@ -18,6 +18,7 @@ test("open a shift, take a partial cash payment and then the remainder by card",
 
   // Smen yoxdursa nağd ödəniş düzgün səbəblə rədd olunur, smen açıldıqdan sonra keçir
   const shiftCard = page.getByRole("region", { name: "Kassa smeni" });
+  await expect(shiftCard.getByText(/Açıq|Bağlı/)).toBeVisible();   // yüklənməni gözlə
   if (await shiftCard.getByRole("button", { name: "Smeni aç" }).isVisible()) {
     await page.goto(`/billing/${draft.id}`);
     await page.getByLabel("Məbləğ (AZN)").fill("10");

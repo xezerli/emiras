@@ -53,7 +53,7 @@ test("same phone triggers the duplicate warning; confirming creates the family m
   await expect(page.getByRole("heading", { level: 1, name: /Aysel/ })).toBeVisible();
 });
 
-test("a reception user sees masked data and has no reveal control", async ({ page, request }) => {
+test("reception sees masked data first; reveal is allowed by its branch-scoped patient:read_sensitive", async ({ page, request }) => {
   const admin = await apiAs(request);
   const me = await admin.call<{ branches: string[] }>("get", "/auth/me");
   const last = unique("Mask");
@@ -63,6 +63,7 @@ test("a reception user sees masked data and has no reveal control", async ({ pag
   await signInAs(page, "reception");
   await page.goto(`/patients/${p.id}`);
   await expect(page.getByRole("heading", { level: 1, name: new RegExp(last) })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Məlumatları göstər" })).toHaveCount(0);
   await expect(page.getByText(phone)).toHaveCount(0);
+  await page.getByRole("button", { name: "Məlumatları göstər" }).click();
+  await expect(page.getByText(phone)).toBeVisible();
 });
