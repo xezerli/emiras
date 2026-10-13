@@ -185,7 +185,7 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends age postgresql-client-16 || sudo apt-get install -y --no-install-recommends age postgresql-client
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends age postgresql-client
       - name: Miqrasiya icraçısı
         run: ADMIN_URL="$PG_ADMIN_URL" dental-erp/db/test-migrate.sh
       - name: Ehtiyat nüsxə və bərpa sınağı
@@ -194,7 +194,8 @@ jobs:
         run: |
           curl -fsSL https://raw.githubusercontent.com/helm/helm/v3.16.4/scripts/get-helm-3 | DESIRED_VERSION=v3.16.4 bash
           go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
-          export PATH="$PATH:$(go env GOPATH)/bin"
+          gobin="$(go env GOPATH)/bin"
+          export PATH="$PATH:$gobin"
           helm lint dental-erp/infra/helm/dentacore
           python3 dental-erp/infra/helm/test-chart.py kubeconform
       - name: Prometheus qaydaları və konfiqurasiya
