@@ -1,1 +1,11 @@
-{ "name": "@dentacore/ui", "version": "0.1.0", "private": true, "main": "src/index.ts", "scripts": { "lint": "echo todo", "test": "echo todo" } }
+{
+  "name": "@dentacore/ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": { "typecheck": "tsc -p tsconfig.json", "lint": "tsc -p tsconfig.json", "test": "vitest run" },
+  "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" },
+  "devDependencies": { "react": "^19.2.0", "react-dom": "^19.2.0" }
+}

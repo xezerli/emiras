@@ -14,7 +14,8 @@
 | 7a | Audit publisher (outbox) + Dashboard (Redis keşi) | ✅ Tamamlandı |
 | 7b | Sync (offline pull/snapshot/push, konflikt həlli) | ✅ Tamamlandı |
 | 7c | Elasticsearch indexer + axtarış (REAL Elasticsearch 8.11 ilə sınaqdan keçib) | ✅ Tamamlandı |
-| 8 | Frontend (Next.js): Design System, auth, əsas ekranlar | |
+| 8a | Frontend əsası: tipli API klienti, Design System, BFF auth, shell, dashboard, realtime | ✅ Tamamlandı |
+| 8b | Pasiyent / təqvim / maliyyə ekranları, DevSeed, Playwright e2e | |
 
 ---
 
@@ -696,4 +697,40 @@ Dəyişən yoxdursa ona bağlı testlər **atlanır** (uğursuz sayılmır). Mə
 
 Slice 1–7 tamdır: BuildingBlocks və Identity, Patient, Scheduling, Clinical, mesajlaşma, Billing, Notify və Gateway, Audit publisher və Dashboard, Sync, Elasticsearch. **Qalan (spesifikasiyada Mərhələ 7-yə aid):** Frontend (Next.js). Mobil (Flutter), desktop (MAUI), Inventory, Laboratory, HR, Accounting, CRM, Imaging, AI modulları spesifikasiyanın Faza 2–3 hissəsidir və əvvəlcədən razılaşdırılmış plana görə bu MVP dilimlərinə daxil deyil.
 
-> Növbəti dilim: **8 Frontend (Next.js)**: Design System, auth, əsas ekranlar. Sonra Mərhələ 8 (Testing), 9 (Deployment), 10 (Documentation). Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 8a: Frontend əsası (Next.js)
+
+`frontend/` pnpm workspace-dir: `@dentacore/api-client`, `@dentacore/ui`, `@dentacore/web` (Next.js 16 App Router, React 19, TypeScript strict).
+
+| Paket | Məsuliyyət |
+|---|---|
+| `api-client` | `api/openapi.yaml`-dan `openapi-typescript` ilə **generasiya olunmuş tiplər** (`pnpm gen:api`, commit olunur) + `openapi-fetch` klienti. Bearer, dev `X-Tenant`, **401-də tək-uçuşlu refresh və bir dəfə təkrar** (body `clone()` ilə təkrar göndərilir), `ApiError` (RFC 9457 + `code`), `newIdempotencyKey()`, `ifMatch()`. |
+| `ui` | `tokens.css` (M3 + glass, dark/light) üzərində `Button, Card, TextField/SelectField, Badge, Alert, Skeleton, EmptyState, Spinner, ThemeToggle`. Etiket/hint/xəta `aria-describedby` ilə bağlıdır; Badge rəngdən əlavə simvol daşıyır; `prefers-reduced-motion/transparency` nəzərə alınıb; tema `localStorage` bloklananda OS seçiminə düşür. |
+| `web` | Login, qorunan shell (skip-link, rola görə naviqasiya, tema, çıxış), dashboard (KPI, əlçatan SVG qrafik + cədvəl, otaqlar, xidmətlər), SignalR realtime. |
+
+### Autentifikasiya (BFF)
+
+- Brauzer **heç vaxt refresh token görmür**: `/api/session/{login,refresh,logout}` route handler-ləri Identity-ni çağırıb refresh token-i `HttpOnly; SameSite=Strict; Path=/api/session` (+ prod-da `Secure`) cookie-yə yazır, JSON-da yalnız `accessToken` qaytarır.
+- Access token **yalnız yaddaşdadır** (localStorage/sessionStorage yox; test təsdiq edir). Səhifə yenilənəndə cookie ilə `refresh` çağırılıb sessiya bərpa olunur.
+- CSRF: `SameSite=Strict` + BFF-də **Origin == Host yoxlaması** (yoxdursa/yadırsa 403, upstream çağırılmır).
+- Kirayəçi: prod-da `Host` (`X-Forwarded-Host`) Gateway-ə ötürülür; `X-Tenant` yalnız `DEV_TENANT` təyin olunanda göndərilir.
+- Etibarsız refresh token (401/400) cookie-ni silir; müvəqqəti 5xx silmir. Logout upstream əlçatmaz olsa da cookie-ni silir.
+- 2FA: login `202` challenge qaytaranda UI məlumat göstərir, **təsdiq ekranı sonrakı dilimdədir** (backend `2fa/verify` də hələ yoxdur).
+
+### Realtime
+
+`useRealtime` `/hubs/notifications`-a qoşulur (token hər qoşulmada təzə), server bildirişi yalnız "nə dəyişdi" daşıyır, klient `scheduling.* / billing.* / clinical.*` hadisələrində `dashboard`, `appointments`, `invoices`, `visits` sorğu açarlarını etibarsız edir. Qoşulma alınmasa tətbiq refetch ilə işləməyə davam edir.
+
+### Test və yoxlama
+
+`api-client` 11, `ui` 12 (axe daxil), `web` 26 (BFF cookie/Origin/tenant başlıqları, icazə naviqasiyası, realtime xəritəsi, token yaddaşı, xəta mesajları, qrafik a11y) test; hamısı keçir. `eslint` təmiz, `next build` uğurlu. Real `next start` ilə saxta Identity-yə qarşı login cavabı yoxlandı (cookie atributları, cross-origin 403).
+
+### Məlum məhdudiyyətlər
+
+- Rəng kontrastı axe-də jsdom-da yoxlanmır (CSS yoxdur): Playwright e2e-də (8b) real brauzerdə yoxlanacaq.
+- Dashboard filial seçimi və tarix seçimi hələ yoxdur (server defaultu: icazəli filiallar, bu gün).
+- Naviqasiya linkləri `/patients, /calendar, /billing` 8b-də yaradılır; hələ 404 verir.
+- Offline rejim və sync UI yoxdur (backend hazırdır).
+
+> Növbəti dilim: **8b**: pasiyent axtarışı/siyahısı/kartı/yaradılması, təqvim günü + check-in, faktura və ödəniş, DevSeed aləti və Playwright e2e (real stack). Davam etmək üçün **"Davam et"** yazın.
