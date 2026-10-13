@@ -64,6 +64,13 @@ public sealed class ConsumesAttribute(string name, params string[] routingKeys) 
     public string Name { get; } = name;
 
     public string[] RoutingKeys { get; } = routingKeys;
+
+    /// <summary>
+    /// true = hər host nüsxəsi ÖZ müvəqqəti növbəsini alır və hər mesajı görür (SignalR kimi proses-daxili vəziyyəti yeniləmək üçün).
+    /// Növbə exclusive/auto-delete-dir, DLQ yoxdur: itirilən canlı bildiriş təkrar çatdırılmır (klient yenidən qoşulanda API-dən oxuyur).
+    /// false (default) = nüsxələr bir növbəni bölüşür, hər mesaj bir nüsxəyə düşür, uğursuzluq DLQ-ya gedir.
+    /// </summary>
+    public bool Broadcast { get; init; }
 }
 
 public interface IIntegrationConsumer
@@ -75,7 +82,11 @@ public interface IIntegrationConsumer
     Task HandleAsync(IntegrationEnvelope envelope, CancellationToken cancellationToken);
 }
 
-internal sealed record ConsumerRegistration(Type ConsumerType, string Name, string[] RoutingKeys);
+internal sealed record ConsumerRegistration(Type ConsumerType, string Name, string[] RoutingKeys, bool Broadcast = false)
+{
+    /// <summary>Broadcast növbəsinin adını nüsxəyə görə unikal edir.</summary>
+    public string InstanceId { get; } = Guid.NewGuid().ToString("N")[..8];
+}
 
 internal static class RabbitMqConfig
 {

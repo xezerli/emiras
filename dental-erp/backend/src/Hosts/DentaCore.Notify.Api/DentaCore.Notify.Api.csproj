@@ -1,2 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../../Modules/Notify/DentaCore.Notify.Infrastructure/DentaCore.Notify.Infrastructure.csproj" />
+  </ItemGroup>
 </Project>

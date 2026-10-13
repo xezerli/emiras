@@ -61,13 +61,13 @@ public sealed class TestKeys : IDisposable
 
     public string PrivatePem => _rsa.ExportPkcs8PrivateKeyPem();
 
-    public string Mint(Guid userId, Guid tenantId, IEnumerable<string> permissions, IEnumerable<string>? branches = null, string name = "Test User")
+    public string Mint(Guid userId, Guid tenantId, IEnumerable<string> permissions, IEnumerable<string>? branches = null, string name = "Test User", TimeSpan? lifetime = null)
     {
         var descriptor = new Microsoft.IdentityModel.Tokens.SecurityTokenDescriptor
         {
             Issuer = "https://auth.dentacore.app",
             Audience = "dentacore-api",
-            Expires = DateTime.UtcNow.AddMinutes(10),
+            Expires = DateTime.UtcNow.Add(lifetime ?? TimeSpan.FromMinutes(10)),
             Claims = new Dictionary<string, object>
             {
                 ["sub"] = userId.ToString(),

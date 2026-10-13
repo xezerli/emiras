@@ -3,6 +3,7 @@ using DentaCore.BuildingBlocks.Infrastructure.Tenancy;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 
 namespace DentaCore.BuildingBlocks.Infrastructure.Messaging;
@@ -30,8 +31,16 @@ public static class MessagingServiceCollectionExtensions
     public static IServiceCollection AddOutboxPublisher(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        services.AddHostedService<RabbitMqConsumerHost>();
+        services.AddIntegrationConsumerHost();
         services.AddHostedService<OutboxPublisherService>();
+        return services;
+    }
+
+    /// <summary>Yalnız consumer host (publisher olmayan host-lar, məs. Notify). Təkrar çağırış zərərsizdir.</summary>
+    public static IServiceCollection AddIntegrationConsumerHost(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, RabbitMqConsumerHost>());
         return services;
     }
 
@@ -50,7 +59,7 @@ public static class MessagingServiceCollectionExtensions
         var attribute = typeof(TConsumer).GetCustomAttribute<ConsumesAttribute>()
             ?? throw new InvalidOperationException($"{typeof(TConsumer).Name} must be annotated with [Consumes].");
         services.AddScoped<TConsumer>();
-        services.AddSingleton(new ConsumerRegistrationHolder(new ConsumerRegistration(typeof(TConsumer), attribute.Name, attribute.RoutingKeys)));
+        services.AddSingleton(new ConsumerRegistrationHolder(new ConsumerRegistration(typeof(TConsumer), attribute.Name, attribute.RoutingKeys, attribute.Broadcast)));
         return services;
     }
 }

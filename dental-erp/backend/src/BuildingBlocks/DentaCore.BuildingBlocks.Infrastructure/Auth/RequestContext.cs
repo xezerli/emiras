@@ -54,6 +54,12 @@ public sealed class JwtValidationOptions
     public string Audience { get; set; } = "dentacore-api";
 
     public string? PublicKeyPem { get; set; }
+
+    /// <summary>
+    /// Brauzerin WebSocket/SSE əl sıxması Authorization başlığı göndərə bilmir, ona görə bu yollarda token <c>?access_token=</c>-dan oxunur
+    /// (yalnız SignalR: <c>/hubs</c>). Query-dəki token proxy/access log-larına düşə bilər: log-larda query string saxlanmamalıdır.
+    /// </summary>
+    public string[] AccessTokenQueryPaths { get; set; } = [];
 }
 
 internal sealed class ConfigurePublicKeyJwtBearer(IOptions<JwtValidationOptions> options) : IConfigureNamedOptions<JwtBearerOptions>
@@ -74,6 +80,24 @@ internal sealed class ConfigurePublicKeyJwtBearer(IOptions<JwtValidationOptions>
         }
 
         o.MapInboundClaims = false;
+        var queryPaths = options.Value.AccessTokenQueryPaths;
+        if (queryPaths.Length > 0)
+        {
+            o.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    var token = context.Request.Query["access_token"].ToString();
+                    if (token.Length > 0 && queryPaths.Any(path => context.HttpContext.Request.Path.StartsWithSegments(path, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        context.Token = token;
+                    }
+
+                    return Task.CompletedTask;
+                },
+            };
+        }
+
         o.TokenValidationParameters = new TokenValidationParameters
         {
             ValidIssuer = options.Value.Issuer,

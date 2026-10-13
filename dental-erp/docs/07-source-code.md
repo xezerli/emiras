@@ -10,8 +10,8 @@
 | 4 | Clinical (vizit, odontoqram tarixçəsi, müalicə planı, resept allergiya yoxlaması ilə, imzalanan qeyd) | ✅ Tamamlandı |
 | 5a | Mesajlaşma: Outbox publisher + inbox + consumer host (RabbitMQ), no-show consumer, tenant maintenance | ✅ Tamamlandı |
 | 5b | Billing (qiymət siyahısı, faktura, ödəniş, kassa smeni, refund) + prosedur→qaralama faktura consumer-i | ✅ Tamamlandı |
-| 6 | Audit publisher, Notify (SignalR), Gateway (YARP) | |
-| 7 | Dashboard, Sync, Elasticsearch indexer | |
+| 6 | Notify (SignalR canlı bildirişlər) + Gateway (YARP) | ✅ Tamamlandı |
+| 7 | Audit publisher, Dashboard, Sync, Elasticsearch indexer | |
 | 8 | Frontend (Next.js): Design System, auth, əsas ekranlar | |
 
 ---
@@ -429,4 +429,72 @@ Yeni `DentaCore.Workers.IntegrationTests` (8 test) **real PostgreSQL və real Ra
 - **Hesabatlar, gəlir/borc dashboard-u və Accounting jurnalı** hələ yoxdur; `billing.payment-received` və digər hadisələr outbox-a düşür, dinləyən yoxdur.
 - Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Testcontainers, SignalR, Elasticsearch) qüvvədə qalır.
 
-> Növbəti dilim: **6 Audit publisher, Notify (SignalR) və Gateway (YARP)**: bütün host-ları bir giriş nöqtəsinə bağlayır, hadisələri canlı bildirişə çevirir. Davam etmək üçün **"Davam et"** yazın.
+---
+
+## Dilim 6: Notify (SignalR) və Gateway (YARP)
+
+### Nə yazıldı
+
+| Hissə | Məzmun |
+|---|---|
+| `Modules/Notify/Application` | `NotificationRouter` (hadisə → bildiriş + hədəf qruplar), `GroupMembership` (token → qruplar), `GroupNames`: təmiz məntiq, broker və SignalR-dan asılı deyil |
+| `Modules/Notify/Infrastructure` | `NotificationHub` (`/hubs/notifications`), `RealtimeConsumer` (RabbitMQ → SignalR), DI |
+| `Hosts/DentaCore.Notify.Api` | JWT (WebSocket üçün `?access_token=`), hub, `CloseOnAuthenticationExpiration` |
+| `Hosts/DentaCore.Gateway` | YARP: marşrutlar, orijinal Host, X-Forwarded-* siyasəti, rate limit, korrelyasiya id-si, təhlükəsizlik başlıqları, `/health/downstream` |
+| `BuildingBlocks` | **Broadcast consumer** (`[Consumes(..., Broadcast = true)]`), `AddIntegrationConsumerHost`, `Jwt:AccessTokenQueryPaths` |
+| `Scheduling.Domain` | `AppointmentRescheduled/Cancelled/Missed` hadisələrinə `BranchId` əlavə olundu (filial üzrə marşrutlaşdırma üçün; geriyə uyğundur, müqavilə `AppointmentMissedV1` dəyişmədi) |
+
+### Canlı bildirişlər: təhlükəsizlik modeli
+
+- **Bildiriş məzmun daşımır**: yalnız `event`, `entityId`, `patientId`, `branchId`, `at`. Məbləğ, ad, diaqnoz yoxdur. Klient dəyişikliyi bilib məlumatı öz səlahiyyəti ilə API-dən oxuyur, ona görə canlı kanal məlumat sızdıra bilməz (test: ödəniş bildirişində `987.65`, ad və üsul simvolları yoxdur, sahələr dəqiq 5-dir).
+- **Qrup üzvlüyü bağlantı anında token claim-lərindən hesablanır** (`tid`, `perm`, `branch`), klient qrup seçə bilmir. Üç sahə: `appointments` (`appointment:read`), `billing` (`invoice:read`), `clinical` (`clinical:read`). Scope: `tenant` hamısı, `branch` yalnız öz filialları (`*` = tenant qrupu), `own` yalnız provayder olduğu hadisələr.
+- **Tenant hər qrup adındadır** (`t:<tenantId>:<sahə>[:b:<filial>|:u:<istifadəçi>]`). Başqa tenant-ın tokeni `X-Tenant`/subdomain ilə uyğun gəlmirsə `TenantClaimGuard` bağlantını rədd edir.
+- **Token bitəndə server bağlantını bağlayır** (`CloseOnAuthenticationExpiration`); klient yeni token ilə qoşulur. İcazə dəyişikliyi yeni bağlantıda qüvvəyə minir.
+- **WebSocket token-i query string-dədir** (brauzer başlıq göndərə bilmir), yalnız `/hubs` yolunda. Query string proxy log-larına düşə bilər: **log-larda query saxlanmamalıdır** (Mərhələ 9 yoxlama siyahısına əlavə olundu).
+
+### Çatdırılma modeli
+
+- **Broadcast növbəsi**: hər Notify nüsxəsi öz müvəqqəti (`exclusive`, `auto-delete`) növbəsini alır və **hər mesajı** görür, çünki bağlantılar nüsxələr arasında bölünüb və yalnız öz klientlərinə göndərə bilər. Redis backplane lazım olmur. (Paylaşılan növbə olsaydı hadisə bir nüsxəyə düşüb digər nüsxədəki klientlərə heç vaxt çatmazdı: test bunu sübut edir.)
+- **Canlı bildiriş itkiyə yol verilən kanaldır**: broadcast növbəsində DLQ və inbox yoxdur, uğursuz və oxunmayan mesaj atılır. Klient yenidən qoşulanda cari vəziyyəti API-dən oxuyur. Dəqiq çatdırılma lazım olan hər şey (billing, bildiriş SMS-i və s.) adi növbələrdədir.
+- **Filialı olmayan hadisələr** yalnız tenant qrupuna düşür. Billing `invoice-issued/voided`, `payment-*` və Scheduling-in hamısı filial daşıyır; `ProcedurePerformed` və plan hadisələri hələ daşımır və canlı kanala qoşulmayıb (`clinical.visit-closed` qoşulub).
+
+### Gateway
+
+| Qayda | Necə |
+|---|---|
+| Marşrutlar | `/v1/auth/**` → identity; `/v1/{patients,appointments,queue,waitlist,visits,treatment-plans,clinical-notes,prescriptions,procedure-codes}/**` → clinic-core; `/v1/{services,invoices,payments,cash-shifts}/**` → billing; `/hubs/**` → notify. Resurs adı **tam uyğunlaşır** (`/v1/patientsX` 404) və siyahıda olmayan yol heç bir servisə çatmır |
+| Tenant | Orijinal `Host` ötürülür (subdomain-dən tenant həlli işləsin). Müştərinin `X-Tenant` başlığı silinir (`Gateway:ForwardTenantHeader=true` yalnız lokal) |
+| Forwarded | `X-Forwarded-*` yalnız `Gateway:TrustedProxies` (IP və ya CIDR) siyahısındakı ingress-dən qəbul edilir; qalanı ignor, gateway öz gördüyünü yenidən yazır. Etibarsız peer `X-Forwarded-Host` ilə Host-u saxtalaşdıra bilmir |
+| Rate limit | IP başına pəncərə: ümumi 600/dəq, `/v1/auth` ayrıca 30/dəq (parol sınağına qarşı); 429 + `Retry-After` |
+| İzləmə | `X-Request-Id` (düzgün gələn saxlanır, yoxsa yaradılır; yalnız `[A-Za-z0-9_-]` ≤64), aşağıya ötürülür və cavabda qaytarılır |
+| Cavab | `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` (rədd olunan cavablarda da) |
+| Sağlamlıq | `/health` (öz vəziyyəti, servislərdən asılı deyil), `/health/downstream` (servis adı → `ok/unhealthy/down`, ünvanlar gizlidir, 503 `degraded`) |
+| Limit | Sorğu gövdəsi 10 MB (Kestrel) |
+
+### Testlər (527 test, hamısı keçir; 0 xəbərdarlıq)
+
+| Layihə | Test | Nəyi sübut edir |
+|---|---|---|
+| `Notify.UnitTests` | 18 | Router (qruplar, ids-only, qarışıq/yanlış payload), üzvlük (scope-lar, `*`, ən yüksək scope, saxta claim-lər), tenant qrup adlarında |
+| `Notify.IntegrationTests` | 13 | Real SignalR + RabbitMQ + PostgreSQL: token olmadan rədd, başqa tenant tokeni rədd, WebSocket + query token, long-polling, tenant/filial/sahə/own izolyasiyası, ids-only, `GetAreas`, iki nüsxə hər ikisi çatdırır, pozulmuş/naməlum tenant mesajı axını saxlamır, token bitəndə bağlantı bağlanır |
+| `Gateway.IntegrationTests` | 35 | Real Kestrel stub servislər: 17 marşrut, 5 naməlum yol, gövdə/query/başlıq/status ötürülməsi, Host, X-Tenant silinməsi, etibarsız və etibarlı forwarded başlıqları, request-id, təhlükəsizlik başlıqları, auth limiti, IP başına limit (etibarlı proxy ilə), 502 təcridi, health |
+
+**Mutasiya yoxlamaları** (kod bərpa olundu): `Broadcast` söndürüləndə "hər nüsxə çatdırır" testi, tenant qrup adından çıxarılanda tenant izolyasiyası testi, query-token yolu söndürüləndə 10 test qırılır.
+
+### Testlərin tapdığı real nöqtələr
+
+- **Gateway Host saxtalaşdırması**: `X-Forwarded-Host` etibarsız peer-dən gələndə də Host-u dəyişdirirdi. Səbəb TestServer-də `RemoteIpAddress`-in `null` olması idi (ForwardedHeaders onda etibar edir); istehsalda Kestrel həmişə IP verir. Test indi ingress-i təqlid edən real IP ilə etibarsız və etibarlı halları ayrıca yoxlayır və etibarsız peer-in Host/For/Proto-nu dəyişə bilmədiyini sübut edir.
+- **WebSocket test müştərisi** `ClientWebSocketOptions` başlıqlarını daşımır; token-i brauzer kimi query string ilə göndərmək lazım gəldi. Bu həm də query-token yolunu real sınağa çevirdi.
+- Test layihəsində `appsettings.json` default-u mutasiyanı gizlədirdi (ilk mutasiya yoxlaması etibarsız idi, düzgün konfiqurasiya ilə təkrarlandı).
+
+### Məlum məhdudiyyətlər (dürüst qeyd)
+
+- **Audit publisher bu dilimdən çıxarıldı və Dilim 7-yə köçürüldü** (Elasticsearch indexer ilə birlikdə): audit axınının yeganə istehlakçısı indexer olacaq, əvvəlcədən publisher yazmaq yararsız yük olardı.
+- **Gateway-də JWT yoxlanmır**: autentifikasiya və tenant yoxlaması servislərdə qalır (defense in depth). Gateway-də token yoxlaması (erkən 401) və JWKS cache-i sonrakı işdir.
+- **Gateway-in rate limit-i prosesdədir** (nüsxə başına). Çox nüsxəli quraşdırmada paylaşılan limit üçün Redis lazımdır (Mərhələ 9).
+- **TLS/HSTS ingress-də** bitir, Gateway-də yoxdur. CORS siyasəti hələ təyin olunmayıb (Frontend dilimində).
+- **Canlı kanal klinik prosedur və plan hadisələrini daşımır** (filial yoxdur); Notify daxilində SMS/e-poçt/push göndərişi (Communication modulu) yoxdur.
+- **Hub-da sərbəst abunə yoxdur**: klient qrup seçə bilmir (bilərəkdən). Məsələn, "bu pasiyentin kartını izləyirəm" kimi dar abunələr lazım olsa icazə yoxlaması ilə əlavə olunmalıdır.
+- Əvvəlki dilimlərin qalan məhdudiyyətləri (2FA, JWKS, Testcontainers, Elasticsearch, `POST /invoices` idempotentliyi) qüvvədə qalır.
+
+> Növbəti dilim: **7 Audit publisher, Dashboard, Sync və Elasticsearch indexer**. Davam etmək üçün **"Davam et"** yazın.

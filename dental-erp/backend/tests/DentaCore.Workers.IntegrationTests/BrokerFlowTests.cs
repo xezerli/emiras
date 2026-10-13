@@ -129,7 +129,7 @@ public sealed class BrokerFlowTests(MessagingFixture fx)
     public async Task Scheduling_domain_event_json_is_readable_through_the_published_contract()
     {
         // Domen hadisəsinin real JSON-u müqavilə tipinə uyğun olmalıdır; sahə adı dəyişsə bu test qırılır.
-        var domainEvent = new Scheduling.Domain.AppointmentMissed(Guid.NewGuid(), DateTimeOffset.UtcNow, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var domainEvent = new Scheduling.Domain.AppointmentMissed(Guid.NewGuid(), DateTimeOffset.UtcNow, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         var json = JsonSerializer.Serialize(domainEvent, domainEvent.GetType(), IntegrationEnvelope.Json);
         var contract = JsonSerializer.Deserialize<AppointmentMissedV1>(json, IntegrationEnvelope.Json)!;
         Assert.Equal(domainEvent.AppointmentId, contract.AppointmentId);

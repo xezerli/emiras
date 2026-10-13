@@ -28,13 +28,13 @@ public sealed record AppointmentBooked(Guid EventId, DateTimeOffset OccurredAt, 
     public override string RoutingKey => "scheduling.appointment-booked";
 }
 
-public sealed record AppointmentRescheduled(Guid EventId, DateTimeOffset OccurredAt, Guid AppointmentId, Guid PatientId, Guid ProviderId, DateTimeOffset OldStart, DateTimeOffset NewStart, DateTimeOffset NewEnd)
+public sealed record AppointmentRescheduled(Guid EventId, DateTimeOffset OccurredAt, Guid AppointmentId, Guid PatientId, Guid ProviderId, Guid BranchId, DateTimeOffset OldStart, DateTimeOffset NewStart, DateTimeOffset NewEnd)
     : DomainEvent(EventId, OccurredAt)
 {
     public override string RoutingKey => "scheduling.appointment-rescheduled";
 }
 
-public sealed record AppointmentCancelled(Guid EventId, DateTimeOffset OccurredAt, Guid AppointmentId, Guid PatientId, Guid ProviderId, DateTimeOffset Start)
+public sealed record AppointmentCancelled(Guid EventId, DateTimeOffset OccurredAt, Guid AppointmentId, Guid PatientId, Guid ProviderId, Guid BranchId, DateTimeOffset Start)
     : DomainEvent(EventId, OccurredAt)
 {
     public override string RoutingKey => "scheduling.appointment-cancelled";
@@ -47,7 +47,7 @@ public sealed record PatientCheckedIn(Guid EventId, DateTimeOffset OccurredAt, G
 }
 
 /// <summary>Pasiyent gəlmədi. Patient modulu no_show_count və risk skorunu bu hadisə ilə yeniləyəcək.</summary>
-public sealed record AppointmentMissed(Guid EventId, DateTimeOffset OccurredAt, Guid AppointmentId, Guid PatientId, Guid ProviderId)
+public sealed record AppointmentMissed(Guid EventId, DateTimeOffset OccurredAt, Guid AppointmentId, Guid PatientId, Guid ProviderId, Guid BranchId)
     : DomainEvent(EventId, OccurredAt)
 {
     public override string RoutingKey => "scheduling.appointment-missed";
@@ -161,7 +161,7 @@ public sealed class Appointment : AggregateRoot<Guid>
         Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
         if (timeChanged)
         {
-            Raise(new AppointmentRescheduled(Guid.NewGuid(), now, Id, PatientId, providerId, oldStart, slot.Start, slot.End));
+            Raise(new AppointmentRescheduled(Guid.NewGuid(), now, Id, PatientId, providerId, BranchId, oldStart, slot.Start, slot.End));
         }
 
         return Result.Success();
@@ -223,7 +223,7 @@ public sealed class Appointment : AggregateRoot<Guid>
         Status = AppointmentStatus.Cancelled;
         CancelReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim()[..Math.Min(reason.Trim().Length, 500)];
         CancelledAt = now;
-        Raise(new AppointmentCancelled(Guid.NewGuid(), now, Id, PatientId, ProviderId, Slot.Start));
+        Raise(new AppointmentCancelled(Guid.NewGuid(), now, Id, PatientId, ProviderId, BranchId, Slot.Start));
         return Result.Success();
     }
 
@@ -240,7 +240,7 @@ public sealed class Appointment : AggregateRoot<Guid>
         }
 
         Status = AppointmentStatus.NoShow;
-        Raise(new AppointmentMissed(Guid.NewGuid(), now, Id, PatientId, ProviderId));
+        Raise(new AppointmentMissed(Guid.NewGuid(), now, Id, PatientId, ProviderId, BranchId));
         return Result.Success();
     }
 

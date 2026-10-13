@@ -84,12 +84,24 @@ public sealed partial class RabbitMqConsumerHost(
 
     private readonly CancellationTokenSource _stopping = new();
 
-    internal static string QueueName(RabbitMqOptions o, ConsumerRegistration r) => $"{o.QueuePrefix}.{r.Name}";
+    internal static string QueueName(RabbitMqOptions o, ConsumerRegistration r) =>
+        r.Broadcast ? $"{o.QueuePrefix}.{r.Name}.{r.InstanceId}" : $"{o.QueuePrefix}.{r.Name}";
 
     internal static async Task DeclareAsync(IChannel channel, RabbitMqOptions o, ConsumerRegistration r, CancellationToken cancellationToken)
     {
         var queue = QueueName(o, r);
         await channel.ExchangeDeclareAsync(o.Exchange, ExchangeType.Topic, durable: true, autoDelete: false, cancellationToken: cancellationToken);
+        if (r.Broadcast)
+        {
+            await channel.QueueDeclareAsync(queue, durable: false, exclusive: true, autoDelete: true, cancellationToken: cancellationToken);
+            foreach (var key in r.RoutingKeys)
+            {
+                await channel.QueueBindAsync(queue, o.Exchange, key, cancellationToken: cancellationToken);
+            }
+
+            return;
+        }
+
         await channel.ExchangeDeclareAsync(o.DeadLetterExchange, ExchangeType.Direct, durable: true, autoDelete: false, cancellationToken: cancellationToken);
         await channel.QueueDeclareAsync($"{queue}.dlq", durable: true, exclusive: false, autoDelete: false, cancellationToken: cancellationToken);
         await channel.QueueBindAsync($"{queue}.dlq", o.DeadLetterExchange, queue, cancellationToken: cancellationToken);
@@ -119,7 +131,9 @@ public sealed partial class RabbitMqConsumerHost(
         {
             // Oxuna bilməyən mesaj heç vaxt uğurlu olmayacaq: təkrar cəhd etmədən DLQ-ya
             LogPoison(logger, registration.Name);
-            await channel.BasicNackAsync(args.DeliveryTag, false, requeue: false, ct);
+            await (registration.Broadcast
+                ? channel.BasicAckAsync(args.DeliveryTag, false, ct).AsTask()
+                : channel.BasicNackAsync(args.DeliveryTag, false, requeue: false, ct).AsTask());
             return;
         }
 
@@ -142,7 +156,9 @@ public sealed partial class RabbitMqConsumerHost(
                 if (attempt >= delays.Length)
                 {
                     LogDeadLettered(logger, registration.Name, envelope.Id, ex);
-                    await channel.BasicNackAsync(args.DeliveryTag, false, requeue: false, ct);
+                    await (registration.Broadcast
+                        ? channel.BasicAckAsync(args.DeliveryTag, false, ct).AsTask()   // canlı bildiriş: itirilir, DLQ yoxdur
+                        : channel.BasicNackAsync(args.DeliveryTag, false, requeue: false, ct).AsTask());
                     return;
                 }
 
