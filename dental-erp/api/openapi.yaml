@@ -845,11 +845,9 @@ components:
       properties:
         id: { type: string, format: uuid }
         fullName: { type: string }
-        specialty: { type: [string, 'null'] }
         roles: { type: array, items: { type: string } }
         permissions: { type: array, items: { type: object, properties: { code: { type: string }, scope: { type: string, enum: [own, branch, tenant] }, maxAmount: { type: [number, 'null'] } } } }
-        branches: { type: array, items: { type: string, format: uuid } }
-        locale: { type: string }
+        branches: { type: array, items: { type: string, format: uuid }, description: 'Girişi olan filiallar. Bütün filiallara hüququ olan istifadəçi üçün bütün aktiv filiallar' }
     Address:
       type: object
       properties: { city: { type: string }, street: { type: string }, zip: { type: string } }

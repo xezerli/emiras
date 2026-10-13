@@ -44,6 +44,9 @@ internal sealed class UserRepository(IdentityDbContext db) : IUserRepository
         return new UserAccess(userId, fullName, roles, permissions, branchIds, allBranches);
     }
 
+    public async Task<IReadOnlyList<Guid>> GetActiveBranchIdsAsync(CancellationToken cancellationToken) =>
+        await db.Database.SqlQuery<Guid>($"SELECT id AS \"Value\" FROM branches WHERE is_active ORDER BY code").ToListAsync(cancellationToken);
+
     private static int ScopeRank(string scope) => scope switch { "tenant" => 3, "branch" => 2, _ => 1 };
 
     private sealed record PermissionRow(string Code, string Scope);

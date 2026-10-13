@@ -202,7 +202,8 @@ internal sealed class LogoutCommandHandler(
 // -------- Current user --------
 public sealed record GetCurrentUserQuery(Guid UserId) : IQuery<CurrentUserDto>;
 
-public sealed record CurrentUserDto(Guid Id, string FullName, IReadOnlyList<string> Roles, IReadOnlyList<PermissionGrant> Permissions);
+/// <param name="Branches">Girişi olan filiallar. Bütün filiallara hüququ olan istifadəçi üçün bütün aktiv filiallar.</param>
+public sealed record CurrentUserDto(Guid Id, string FullName, IReadOnlyList<string> Roles, IReadOnlyList<PermissionGrant> Permissions, IReadOnlyList<Guid> Branches);
 
 internal sealed class GetCurrentUserQueryHandler(IUserRepository users) : IRequestHandler<GetCurrentUserQuery, CurrentUserDto>
 {
@@ -215,6 +216,7 @@ internal sealed class GetCurrentUserQueryHandler(IUserRepository users) : IReque
         }
 
         var access = await users.GetAccessAsync(user.Id, user.FullName, cancellationToken);
-        return new CurrentUserDto(access.UserId, access.FullName, access.Roles, access.Permissions);
+        var branches = access.AllBranches ? await users.GetActiveBranchIdsAsync(cancellationToken) : access.BranchIds;
+        return new CurrentUserDto(access.UserId, access.FullName, access.Roles, access.Permissions, branches);
     }
 }

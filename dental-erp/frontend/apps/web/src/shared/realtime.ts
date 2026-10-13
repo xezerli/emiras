@@ -23,13 +23,21 @@ export function invalidateFor(qc: QueryClient, n: Notification): void {
   for (const key of queryKeysFor(n.event)) void qc.invalidateQueries({ queryKey: key });
 }
 
+export function devTenantHeaders(tenant = process.env.NEXT_PUBLIC_DEV_TENANT): Record<string, string> {
+  return tenant ? { "X-Tenant": tenant } : {};
+}
+
 export function useRealtime(enabled: boolean): void {
   const qc = useQueryClient();
   useEffect(() => {
     if (!enabled) return;
     const conn = new HubConnectionBuilder()
       // Token hər (yenidən) qoşulmada təzə götürülür; ?access_token yalnız /hubs üçün server tərəfində qəbul olunur
-      .withUrl("/hubs/notifications", { accessTokenFactory: () => tokenStore.get() ?? "" })
+      .withUrl("/hubs/notifications", {
+        accessTokenFactory: () => tokenStore.get() ?? "",
+        // Dev: kirayəçi başlıqla; produksiyada host adından tanınır (SignalR öz fetch-i ilə işlədiyi üçün klientdəki başlıq buraya gəlmir)
+        headers: devTenantHeaders(),
+      })
       .withAutomaticReconnect([0, 2000, 5000, 15000, 30000])
       .configureLogging(LogLevel.Warning)
       .build();

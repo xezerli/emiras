@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@dentacore/api-client";
 import { loginErrorMessage } from "@/app/login/page";
 import { can, visibleNav } from "@/shared/permissions";
-import { invalidateFor, queryKeysFor } from "@/shared/realtime";
+import { devTenantHeaders, invalidateFor, queryKeysFor } from "@/shared/realtime";
 import { RevenueChart } from "@/shared/RevenueChart";
 import { tokenStore } from "@/shared/session";
 
@@ -42,6 +42,14 @@ describe("realtime invalidation", () => {
     spy.mockClear();
     invalidateFor(qc, { event: "other" });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("realtime tenant header", () => {
+  it("sends X-Tenant only in dev", () => {
+    expect(devTenantHeaders("demo")).toEqual({ "X-Tenant": "demo" });
+    expect(devTenantHeaders(undefined)).toEqual({});
+    expect(devTenantHeaders("")).toEqual({});
   });
 });
 

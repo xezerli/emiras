@@ -150,6 +150,7 @@ public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
     public async Task Me_requires_a_valid_token_and_returns_effective_permissions()
     {
         var (email, userId) = await SeedAsync();
+        var branchId = await _db.SeedBranchAsync("t_demo");
         var (access, _) = await LoginAsync(email);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await _client.GetAsync("/v1/auth/me")).StatusCode);
@@ -162,6 +163,8 @@ public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
         var json = await JsonAsync(response);
         Assert.Equal(userId, json.GetProperty("id").GetGuid());
         Assert.Contains(json.GetProperty("permissions").EnumerateArray(), p => p.GetProperty("code").GetString() == "appointment:write");
+        // Rolun filialı NULL (bütün filiallar) → /me bütün aktiv filialları qaytarır (UI filial seçimi üçün)
+        Assert.Contains(json.GetProperty("branches").EnumerateArray(), b => b.GetGuid() == branchId);
     }
 
     [IntegrationFact]

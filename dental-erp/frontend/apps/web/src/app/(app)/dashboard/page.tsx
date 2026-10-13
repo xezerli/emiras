@@ -2,9 +2,11 @@
 import { unwrap } from "@dentacore/api-client";
 import { Alert, Badge, Card, EmptyState, Skeleton } from "@dentacore/ui";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { useAuth } from "@/shared/AuthProvider";
 import { formatMoney } from "@/shared/format";
-import { can } from "@/shared/permissions";
+import { can, visibleNav } from "@/shared/permissions";
 import { RevenueChart } from "@/shared/RevenueChart";
 import { api } from "@/shared/session";
 
@@ -25,7 +27,13 @@ function Kpi({ label, value }: { label: string; value: string | number }) {
 
 export default function DashboardPage() {
   const { user, signOut } = useAuth();
+  const router = useRouter();
   const allowed = can(user?.permissions, "report:read");
+  // İdarə panelinə icazəsi olmayan rol (qəbul, həkim) ilk əlçatan bölməyə yönləndirilir
+  const fallback = visibleNav(user?.permissions)[0]?.href;
+  useEffect(() => {
+    if (!allowed && fallback) router.replace(fallback);
+  }, [allowed, fallback, router]);
   const q = useQuery({
     queryKey: ["dashboard", "summary"],
     enabled: allowed,

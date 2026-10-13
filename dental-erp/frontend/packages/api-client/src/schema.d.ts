@@ -1151,7 +1151,6 @@ export interface components {
             /** Format: uuid */
             id?: string;
             fullName?: string;
-            specialty?: string | null;
             roles?: string[];
             permissions?: {
                 code?: string;
@@ -1159,8 +1158,8 @@ export interface components {
                 scope?: "own" | "branch" | "tenant";
                 maxAmount?: number | null;
             }[];
+            /** @description Girişi olan filiallar. Bütün filiallara hüququ olan istifadəçi üçün bütün aktiv filiallar */
             branches?: string[];
-            locale?: string;
         };
         Address: {
             city?: string;

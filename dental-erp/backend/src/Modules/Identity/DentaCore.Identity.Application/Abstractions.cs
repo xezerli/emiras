@@ -31,6 +31,9 @@ public interface IUserRepository
     Task<IReadOnlyList<string>> GetAllowedIpsAsync(Guid userId, CancellationToken cancellationToken);
 
     Task<UserAccess> GetAccessAsync(Guid userId, string fullName, CancellationToken cancellationToken);
+
+    /// <summary>Aktiv filialların id-ləri (kod sırası ilə). "Bütün filiallar" hüququ olan istifadəçinin /auth/me cavabı üçün.</summary>
+    Task<IReadOnlyList<Guid>> GetActiveBranchIdsAsync(CancellationToken cancellationToken);
 }
 
 public interface IRefreshTokenRepository
