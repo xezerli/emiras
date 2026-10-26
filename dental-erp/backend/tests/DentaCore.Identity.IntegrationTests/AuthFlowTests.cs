@@ -6,6 +6,8 @@ using Microsoft.IdentityModel.JsonWebTokens;
 
 namespace DentaCore.Identity.IntegrationTests;
 
+// ApiFactory konfiqurasiyanı proses-geniş mühit dəyişənləri ilə verir: eyni assembly-dəki iki host paralel qalxsa bir-birinin açarlarını/DB-sini görər
+[Collection("Identity host (env-var configured)")]
 public sealed class AuthFlowTests : IClassFixture<PostgresFixture>, IDisposable
 {
     private readonly PostgresFixture _db;

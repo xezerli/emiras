@@ -17,6 +17,39 @@ public sealed record UserAccess(
 
 public sealed record IssuedAccessToken(string Token, int ExpiresInSeconds);
 
+public sealed record RoleAssignment(string Role, Guid? BranchId);
+
+public sealed record RoleGrant(string Permission, string Scope, decimal? MaxAmount);
+
+public sealed record RoleRow(string Code, string Name, bool IsSystem, IReadOnlyList<RoleGrant> Grants);
+
+public sealed record PermissionInfo(string Code, string? Description);
+
+public sealed record UserRow(Guid Id, string FullName, byte[] EmailEnc, string Status, DateTimeOffset? LastLoginAt, bool TwoFactorEnabled, IReadOnlyList<RoleAssignment> Roles);
+
+/// <summary>İstifadəçi/rol idarəetməsi üçün oxu və rol cədvəllərinin yazısı (user_roles, role_permissions EF-də xəritələnmir).</summary>
+public interface IUserAdminStore
+{
+    /// <summary>Ada və id-yə görə sıralı, keyset səhifələmə. <paramref name="after"/> əvvəlki səhifənin son sətridir.</summary>
+    Task<IReadOnlyList<UserRow>> ListUsersAsync((string FullName, Guid Id)? after, string? status, int limit, CancellationToken cancellationToken);
+
+    Task<UserRow?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<RoleRow>> ListRolesAsync(CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<PermissionInfo>> ListPermissionsAsync(CancellationToken cancellationToken);
+
+    /// <summary>Verilənlərdən bazada olmayan rol kodlarını qaytarır.</summary>
+    Task<IReadOnlyList<string>> MissingRolesAsync(IReadOnlyCollection<string> roleCodes, CancellationToken cancellationToken);
+
+    /// <summary>Verilənlərdən aktiv olmayan və ya olmayan filial id-lərini qaytarır.</summary>
+    Task<IReadOnlyList<Guid>> MissingBranchesAsync(IReadOnlyCollection<Guid> branchIds, CancellationToken cancellationToken);
+
+    Task ReplaceUserRolesAsync(Guid userId, IReadOnlyCollection<RoleAssignment> assignments, CancellationToken cancellationToken);
+
+    Task ReplaceRoleGrantsAsync(string roleCode, IReadOnlyCollection<RoleGrant> grants, CancellationToken cancellationToken);
+}
+
 public interface IIdentityUnitOfWork : IModuleUnitOfWork
 {
 }
@@ -26,6 +59,8 @@ public interface IUserRepository
     Task<User?> FindByEmailHashAsync(byte[] emailHash, CancellationToken cancellationToken);
 
     Task<User?> GetAsync(Guid userId, CancellationToken cancellationToken);
+
+    void Add(User user);
 
     /// <summary>users.allowed_ips (CIDR). Boşdursa IP məhdudiyyəti yoxdur.</summary>
     Task<IReadOnlyList<string>> GetAllowedIpsAsync(Guid userId, CancellationToken cancellationToken);
@@ -50,6 +85,9 @@ public interface IRefreshTokenRepository
 
     /// <summary>Family-nin hələ ləğv olunmamış tokenlərini ləğv edir. Ləğv olunan sətirlərin sayını qaytarır (0 = artıq ləğv olunub).</summary>
     Task<int> RevokeFamilyAsync(Guid familyId, DateTimeOffset now, CancellationToken cancellationToken);
+
+    /// <summary>İstifadəçinin bütün aktiv sessiyalarını ləğv edir (söndürmə, parol sıfırlama, rol dəyişikliyi).</summary>
+    Task<int> RevokeAllForUserAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
 public interface IPasswordHasher

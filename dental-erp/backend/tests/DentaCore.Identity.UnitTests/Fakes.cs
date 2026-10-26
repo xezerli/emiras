@@ -81,6 +81,8 @@ internal sealed class FakeUsers : IUserRepository
     public Task<User?> GetAsync(Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult(Items.FirstOrDefault(u => u.Id == userId));
 
+    public void Add(User user) => Items.Add(user);
+
     public Task<IReadOnlyList<string>> GetAllowedIpsAsync(Guid userId, CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<string>>(AllowedIps);
 
@@ -121,6 +123,14 @@ internal sealed class FakeRefreshTokens : IRefreshTokenRepository
 
     public Task<int> RevokeFamilyAsync(Guid familyId, DateTimeOffset now, CancellationToken cancellationToken) =>
         Task.FromResult(RevokedFamilies.Add(familyId) ? 1 : 0);
+
+    public List<Guid> RevokedUsers { get; } = [];
+
+    public Task<int> RevokeAllForUserAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        RevokedUsers.Add(userId);
+        return Task.FromResult(1);
+    }
 }
 
 internal static class TestPii

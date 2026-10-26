@@ -12,6 +12,8 @@ internal sealed class UserRepository(IdentityDbContext db) : IUserRepository
     public Task<User?> GetAsync(Guid userId, CancellationToken cancellationToken) =>
         db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
+    public void Add(User user) => db.Users.Add(user);
+
     public async Task<IReadOnlyList<string>> GetAllowedIpsAsync(Guid userId, CancellationToken cancellationToken) =>
         await db.Database
             .SqlQuery<string>($"SELECT ip::text AS \"Value\" FROM users u, unnest(u.allowed_ips) AS ip WHERE u.id = {userId}")
@@ -69,6 +71,11 @@ internal sealed class RefreshTokenRepository(IdentityDbContext db) : IRefreshTok
             cancellationToken);
         return affected == 1;
     }
+
+    public async Task<int> RevokeAllForUserAsync(Guid userId, DateTimeOffset now, CancellationToken cancellationToken) =>
+        await db.Database.ExecuteSqlAsync(
+            $"UPDATE refresh_tokens SET revoked_at = {now} WHERE user_id = {userId} AND revoked_at IS NULL",
+            cancellationToken);
 
     public async Task<int> RevokeFamilyAsync(Guid familyId, DateTimeOffset now, CancellationToken cancellationToken) =>
         await db.Database.ExecuteSqlAsync(

@@ -75,6 +75,28 @@ public sealed class User : AggregateRoot<Guid>
 
     public void Disable() => Status = UserStatus.Disabled;
 
+    /// <summary>Söndürülmüş və ya bloklanmış hesabı yenidən açır, uğursuz giriş sayğacını sıfırlayır.</summary>
+    public void Enable()
+    {
+        Status = UserStatus.Active;
+        FailedLogins = 0;
+        LockedUntil = null;
+    }
+
+    public void Rename(string fullName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fullName);
+        FullName = fullName.Trim();
+    }
+
+    public void ChangePassword(string passwordHash)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
+        PasswordHash = passwordHash;
+        FailedLogins = 0;
+        LockedUntil = null;
+    }
+
     public bool IsLockedAt(DateTimeOffset now) => LockedUntil is { } until && until > now;
 
     /// <summary>Giriş cəhdindən əvvəl yoxlanılır: söndürülmüş və ya müvəqqəti bloklanmış hesab.</summary>
