@@ -138,6 +138,16 @@ describe("invoice payment page", async () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("kassa smenini açın"));
   });
 
+  it("shows payment methods in Azerbaijani, not the raw API value", async () => {
+    perms = ["invoice:read"];
+    routeParams = { id: "inv1" };
+    handler = () => json(200, invoice({ status: "partially_paid", balance: 50, paidTotal: 30, payments: [{ id: "p", kind: "payment", method: "cash", amount: 30 }, { id: "q", kind: "payment", method: "pos", amount: 5 }] }));
+    renderWithQuery(<InvoicePage />);
+    expect(await screen.findByText(/\(Nağd\)/)).toBeInTheDocument();
+    expect(screen.getByText(/\(POS terminal\)/)).toBeInTheDocument();
+    expect(screen.queryByText(/\(cash\)/)).not.toBeInTheDocument();
+  });
+
   it("hides the payment form without payment:write or on a paid invoice", async () => {
     routeParams = { id: "inv1" };
     perms = ["invoice:read"];
@@ -279,6 +289,8 @@ describe("patient card", async () => {
     renderWithQuery(<PatientPage />);
     expect(await screen.findByText("Ağır allergiya")).toBeInTheDocument();
     expect(screen.getAllByText(/Penisilin/).length).toBeGreaterThan(0);
+    expect(screen.getByText("Anafilaksiya")).toBeInTheDocument();       // lokallaşdırılmış ağırlıq
+    expect(screen.queryByText("anaphylaxis")).not.toBeInTheDocument();  // xam enum göstərilmir
     expect(screen.queryByText("+994501234567")).not.toBeInTheDocument();
 
     vi.useFakeTimers({ shouldAdvanceTime: true });

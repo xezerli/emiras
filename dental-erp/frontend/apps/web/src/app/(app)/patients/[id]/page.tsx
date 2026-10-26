@@ -4,11 +4,13 @@ import { Alert, Badge, Button, Card, Skeleton } from "@dentacore/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { SEVERITY } from "@/features/patients/severity";
 import { useAuth } from "@/shared/AuthProvider";
 import { can } from "@/shared/permissions";
 import { useApi } from "@/shared/useApi";
 
 const REVEAL_MS = 30_000;
+
 
 export default function PatientPage() {
   const { id } = useParams<{ id: string }>();
@@ -69,7 +71,7 @@ export default function PatientPage() {
           <h2 id="med-h">Tibbi profil</h2>
           {profile.isError ? <Alert tone="warning" title="Tibbi profil yüklənmədi" /> : (
             <ul>
-              {allergies.length === 0 ? <li>Allergiya qeydi yoxdur</li> : allergies.map((a) => <li key={a.id ?? a.substance}>{a.substance}{a.reaction ? ` — ${a.reaction}` : ""} <Badge tone={a.severity === "mild" ? "neutral" : "warning"}>{a.severity ?? "—"}</Badge></li>)}
+              {allergies.length === 0 ? <li>Allergiya qeydi yoxdur</li> : allergies.map((a) => <li key={a.id ?? a.substance}>{a.substance}{a.reaction ? ` — ${a.reaction}` : ""} <Badge tone={SEVERITY[a.severity ?? ""]?.tone ?? "neutral"}>{SEVERITY[a.severity ?? ""]?.label ?? a.severity ?? "—"}</Badge></li>)}
             </ul>
           )}
         </Card>

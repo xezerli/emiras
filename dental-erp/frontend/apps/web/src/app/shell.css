@@ -22,6 +22,7 @@
 .chart { width: 100%; height: auto; }
 .chart__bar { fill: var(--md-primary); }
 .chart__axis { fill: var(--md-on-surface-variant); font-size: 11px; }
+.chart__bar { rx: 2px; }
 @media (max-width: 760px) {
   .shell { grid-template-columns: 1fr; }
   .shell__nav { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--glass-border); padding: var(--space-3) var(--space-4); }

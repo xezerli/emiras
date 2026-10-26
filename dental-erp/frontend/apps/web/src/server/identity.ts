@@ -64,7 +64,8 @@ interface TokenPayload {
   expiresIn: number;
 }
 
-const REFRESH_COOKIE_TTL = 60 * 60 * 24 * 30;
+// Serverdəki refresh token ömrü 7 gündür (AuthPolicy.RefreshTokenLifetime): cookie ondan uzun yaşamamalıdır
+const REFRESH_COOKIE_TTL = 60 * 60 * 24 * 7;
 
 /** Token cavabını brauzerə uyğunlaşdırır: refresh token yalnız httpOnly cookie-yə yazılır, JSON-da qaytarılmır. */
 export function sessionResponse(tokens: TokenPayload): NextResponse {

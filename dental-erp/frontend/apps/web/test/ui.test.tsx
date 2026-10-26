@@ -6,7 +6,7 @@ import { ApiError } from "@dentacore/api-client";
 import { loginErrorMessage } from "@/app/login/page";
 import { can, visibleNav } from "@/shared/permissions";
 import { devTenantHeaders, invalidateFor, queryKeysFor } from "@/shared/realtime";
-import { RevenueChart } from "@/shared/RevenueChart";
+import { labelIndexes, RevenueChart } from "@/shared/RevenueChart";
 import { tokenStore } from "@/shared/session";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn() }), usePathname: () => "/" }));
@@ -91,6 +91,24 @@ describe("RevenueChart", () => {
     expect(container.innerHTML).not.toContain("NaN");
     rerender(<RevenueChart data={[{ day: "2026-10-01", amount: 0 }]} />);
     expect(container.innerHTML).not.toContain("NaN");
+  });
+
+  it("30 days show at most 6 axis labels, always including the first and last day", () => {
+    const days = Array.from({ length: 30 }, (_, i) => ({ day: `2026-09-${String(i + 1).padStart(2, "0")}`, amount: i }));
+    const { container } = render(<RevenueChart data={days} />);
+    expect(container.querySelectorAll("svg text").length).toBeLessThanOrEqual(7);
+    expect(container.querySelectorAll("svg text").length).toBeGreaterThanOrEqual(4);
+    const shown = [...labelIndexes(30)];
+    expect(shown[0]).toBe(0);
+    expect(shown.at(-1)).toBe(29);
+    // bütün sütunlar çəkilir, yalnız etiketlər seyrəldilir
+    expect(container.querySelectorAll("svg rect").length).toBe(30);
+  });
+
+  it("labelIndexes keeps small series complete", () => {
+    expect([...labelIndexes(3)]).toEqual([0, 1, 2]);
+    expect(labelIndexes(0).size).toBe(0);
+    expect(labelIndexes(6).size).toBe(6);
   });
 
   it("has no axe violations", async () => {

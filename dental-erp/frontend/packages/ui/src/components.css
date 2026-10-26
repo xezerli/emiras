@@ -1,6 +1,11 @@
 /* Komponent stilləri: yalnız tokens.css dəyişənləri. Fokus halqası bütün interaktiv elementlərdə (WCAG 2.4.7/2.4.11). */
 .dc-body { font-family: var(--font); font-size: var(--fs-body); color: var(--md-on-surface); background: var(--bg-grad); min-height: 100vh; margin: 0; }
 :where(.dc-btn, .dc-input, .dc-select, .dc-icon-btn):focus-visible { outline: 3px solid var(--md-primary); outline-offset: 2px; }
+/* Keçidlər brauzer defoltunda (göy/bənövşəyi) qalmasın: iki temada kontrast tokenlərdən gəlir */
+a { color: var(--md-primary); text-underline-offset: 2px; }
+a:visited { color: var(--md-tertiary); }
+a.dc-btn { text-decoration: none; }
+a.dc-btn--filled, a.dc-btn--filled:visited { color: var(--md-on-primary); }
 .dc-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .dc-btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 40px; padding: 0 var(--space-4);

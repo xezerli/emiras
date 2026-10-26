@@ -75,7 +75,7 @@ export default function InvoicePage() {
       {(i.payments?.length ?? 0) > 0 && (
         <Card aria-labelledby="pay-h">
           <h2 id="pay-h">Ödənişlər</h2>
-          <ul>{i.payments!.map((p) => <li key={p.id}>{p.kind === "refund" ? "Qaytarma" : "Ödəniş"}: {formatMoney(p.amount ?? 0)} ({p.method})</li>)}</ul>
+          <ul>{i.payments!.map((p) => <li key={p.id}>{p.kind === "refund" ? "Qaytarma" : "Ödəniş"}: {formatMoney(p.amount ?? 0)} ({METHODS.find((m) => m.value === p.method)?.label ?? p.method})</li>)}</ul>
         </Card>
       )}
       {canPay && (

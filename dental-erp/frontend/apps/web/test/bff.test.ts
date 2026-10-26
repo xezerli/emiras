@@ -56,6 +56,7 @@ describe("login", () => {
     expect(cookie).toMatch(/HttpOnly/);
     expect(cookie).toMatch(/SameSite=Strict/);
     expect(cookie).toContain("Path=/api/session");
+    expect(cookie).toContain("Max-Age=604800");   // 7 gün: serverdəki refresh token ömrü ilə eyni (cookie ondan uzun yaşamamalıdır)
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 

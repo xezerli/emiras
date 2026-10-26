@@ -217,6 +217,8 @@ flowchart LR
 
 ## 12. Texnologiya qərarları (ADR xülasəsi)
 
+> **Mərhələ 10 qeydi:** bu cədvəl ilkin plandır. Real qərarlar [adr/](adr/README.md)-dədir; MediatR, MassTransit və event sourcing tətbiq **olunmayıb**.
+
 | ADR | Qərar | Səbəb | Alternativ |
 |---|---|---|---|
 | 001 | Modular monolith-ready microservices | Mürəkkəbliyi idarə etmək | Erkən tam bölünmə |
