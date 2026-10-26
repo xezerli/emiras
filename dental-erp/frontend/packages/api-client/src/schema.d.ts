@@ -1798,7 +1798,7 @@ export interface components {
         Limit: number;
         /** @description Resursun rowVersion dəyəri (ETag) */
         IfMatch: string;
-        /** @description Təkrar göndərmə eyni nəticəni qaytarır (24 saat) */
+        /** @description Yalnız ödəniş və refund-da tətbiq olunur (orada məcburidir; açar verilənlər bazasında əbədi unikaldır). Digər əməliyyatlarda başlıq nəzərə alınmır. */
         IdempotencyKey: string;
     };
     requestBodies: never;
@@ -2022,7 +2022,7 @@ export interface operations {
                 confirmDuplicate?: boolean;
             };
             header?: {
-                /** @description Təkrar göndərmə eyni nəticəni qaytarır (24 saat) */
+                /** @description Yalnız ödəniş və refund-da tətbiq olunur (orada məcburidir; açar verilənlər bazasında əbədi unikaldır). Digər əməliyyatlarda başlıq nəzərə alınmır. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -2338,7 +2338,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Təkrar göndərmə eyni nəticəni qaytarır (24 saat) */
+                /** @description Yalnız ödəniş və refund-da tətbiq olunur (orada məcburidir; açar verilənlər bazasında əbədi unikaldır). Digər əməliyyatlarda başlıq nəzərə alınmır. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
@@ -2978,7 +2978,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description Təkrar göndərmə eyni nəticəni qaytarır (24 saat) */
+                /** @description Yalnız ödəniş və refund-da tətbiq olunur (orada məcburidir; açar verilənlər bazasında əbədi unikaldır). Digər əməliyyatlarda başlıq nəzərə alınmır. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path?: never;
