@@ -336,14 +336,18 @@ describe("user administration pages", async () => {
   const aysel = { id: "u1", fullName: "Aysel Əliyeva", email: "a***@clinic.az", status: "active", lastLoginAt: null, twoFactorEnabled: false, roles: [{ role: "cashier", branchId: null }] };
   const locked = { id: "u2", fullName: "Murad Quliyev", email: "m***@clinic.az", status: "locked", lastLoginAt: "2026-10-26T10:00:00Z", twoFactorEnabled: false, roles: [{ role: "hygienist", branchId: null }] };
   const sign = (r: Request) => `${r.method} ${path(r)}`;
+  const branches = [{ id: "b1", code: "MAIN", name: "Mərkəz" }];
+  // /branches bütün testlərdə eynidir; qalan sorğuları testin öz handler-i cavablandırır
+  const setHandler = (h: Handler) => { handler = (r) => (path(r) === "/branches" ? json(200, branches) : h(r)); };
 
   it("lists users with role names and status, and offers enable for a locked account and none to disable yourself", async () => {
     perms = ["user:manage"];
-    handler = (r) => (path(r) === "/roles" ? json(200, roles) : json(200, { items: [{ ...aysel, id: "u" }, locked], nextCursor: null }));
+    setHandler((r) => (path(r) === "/roles" ? json(200, roles) : json(200, { items: [{ ...aysel, id: "u" }, locked, { ...locked, id: "u3", fullName: "Filial İşçisi", status: "active", roles: [{ role: "cashier", branchId: "b1" }] }], nextCursor: null })));
     renderWithQuery(<UsersPage />);
     expect(await screen.findByText("Murad Quliyev")).toBeInTheDocument();
     expect(screen.getAllByText("Kassir").length).toBeGreaterThan(0);
     expect(screen.getByText("Bloklanıb")).toBeInTheDocument();
+    expect(screen.getByText("Kassir (Mərkəz)")).toBeInTheDocument();   // filial məhdudiyyəti rolun yanında göstərilir
     // mockAuth istifadəçisinin id-si "u"-dur: öz sətri üçün söndürmə və rol dəyişmə bağlıdır
     expect(screen.getByRole("button", { name: "Söndür: Aysel Əliyeva" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Rolları dəyiş: Aysel Əliyeva" })).toBeDisabled();
@@ -352,11 +356,11 @@ describe("user administration pages", async () => {
 
   it("enables a locked account", async () => {
     perms = ["user:manage"];
-    handler = (r) => {
+    setHandler((r) => {
       if (path(r) === "/roles") return json(200, roles);
       if (r.method === "POST") return json(200, { ...locked, status: "active" });
       return json(200, { items: [locked], nextCursor: null });
-    };
+    });
     renderWithQuery(<UsersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Aç: Murad Quliyev" }));
     await waitFor(() => expect(calls.map(sign)).toContain("POST /users/u2/enable"));
@@ -365,16 +369,17 @@ describe("user administration pages", async () => {
   it("creates a user, checks the password locally and maps a duplicate-email error", async () => {
     perms = ["user:manage"];
     let status = 201;
-    handler = (r) => {
+    setHandler((r) => {
       if (path(r) === "/roles") return json(200, roles);
       if (r.method === "POST") return status === 201 ? json(201, aysel) : json(409, { code: "user.email_exists" });
       return json(200, { items: [], nextCursor: null });
-    };
+    });
     renderWithQuery(<UsersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Yeni istifadəçi" }));
     await userEvent.type(screen.getByLabelText("E-poçt"), "yeni@clinic.az");
     await userEvent.type(screen.getByLabelText("Ad Soyad"), "Yeni İşçi");
     await userEvent.selectOptions(screen.getByLabelText("Rol"), "cashier");
+    await userEvent.selectOptions(screen.getByLabelText("Filial"), "b1");
     await userEvent.type(screen.getByLabelText("İlkin parol"), "short1");
     expect(screen.getByRole("button", { name: "Yarat" })).toBeDisabled();
     expect(screen.getByText("Parol ən azı 10 simvol olmalıdır.")).toBeInTheDocument();
@@ -389,16 +394,16 @@ describe("user administration pages", async () => {
     await userEvent.click(screen.getByRole("button", { name: "Yarat" }));
     expect(await screen.findByText("İstifadəçi yaradıldı.")).toBeInTheDocument();
     const post = calls.filter((c) => sign(c) === "POST /users").at(-1)!;
-    expect(await post.json()).toEqual({ email: "yeni@clinic.az", fullName: "Yeni İşçi", password: "Str0ng-Passw0rd", roles: [{ role: "cashier", branchId: null }] });
+    expect(await post.json()).toEqual({ email: "yeni@clinic.az", fullName: "Yeni İşçi", password: "Str0ng-Passw0rd", roles: [{ role: "cashier", branchId: "b1" }] });
   });
 
   it("replaces a user's roles keeping existing branches", async () => {
     perms = ["user:manage"];
-    handler = (r) => {
+    setHandler((r) => {
       if (path(r) === "/roles") return json(200, roles);
       if (r.method === "PUT") return json(200, locked);
       return json(200, { items: [locked], nextCursor: null });
-    };
+    });
     renderWithQuery(<UsersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Rolları dəyiş: Murad Quliyev" }));
     await userEvent.click(await screen.findByLabelText("Kassir"));
@@ -410,7 +415,7 @@ describe("user administration pages", async () => {
 
   it("resets a password only when it meets the policy", async () => {
     perms = ["user:manage"];
-    handler = (r) => (path(r) === "/roles" ? json(200, roles) : r.method === "POST" ? new Response(null, { status: 204 }) : json(200, { items: [locked], nextCursor: null }));
+    setHandler((r) => (path(r) === "/roles" ? json(200, roles) : r.method === "POST" ? new Response(null, { status: 204 }) : json(200, { items: [locked], nextCursor: null })));
     renderWithQuery(<UsersPage />);
     await userEvent.click(await screen.findByRole("button", { name: "Parolu sıfırla: Murad Quliyev" }));
     await userEvent.type(screen.getByLabelText("Yeni parol"), "weak");
@@ -424,7 +429,7 @@ describe("user administration pages", async () => {
 
   it("shows administrator roles read-only and saves an edited role without user:manage", async () => {
     perms = ["user:manage"];
-    handler = (r) => (r.method === "PUT" ? json(200, roles.roles[1]) : json(200, roles));
+    setHandler((r) => (r.method === "PUT" ? json(200, roles.roles[1]) : json(200, roles)));
     renderWithQuery(<RolesPage />);
     expect(await screen.findByText("Bu rol dəyişdirilə bilməz")).toBeInTheDocument();
     expect(screen.getByLabelText("patient:read icazəsi")).toBeChecked();
@@ -449,7 +454,7 @@ describe("user administration pages", async () => {
 
   it("maps a protected-role rejection", async () => {
     perms = ["user:manage"];
-    handler = (r) => (r.method === "PUT" ? json(409, { code: "role.protected" }) : json(200, roles));
+    setHandler((r) => (r.method === "PUT" ? json(409, { code: "role.protected" }) : json(200, roles)));
     renderWithQuery(<RolesPage />);
     await userEvent.selectOptions(await screen.findByLabelText("Rol"), "hygienist");
     await userEvent.click(screen.getByLabelText("patient:read icazəsi"));

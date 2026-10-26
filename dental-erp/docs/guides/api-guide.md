@@ -307,12 +307,18 @@ curl -X POST "$API/v1/invoices/$INVOICE/payments" \
 
 Hamısı `user:manage` icazəsi tələb edir (`director` və `clinic_admin`). Hesablar **dəvətlə yox, idarəçinin verdiyi ilkin parolla** yaradılır (e-poçt göndərişi hələ yoxdur): parol ≥10 simvol, hərf və rəqəm. Cavablarda e-poçt maskalıdır (`y***@demo.test`).
 
+Filial seçmək üçün əvvəl siyahını alın:
+
+```bash
+curl "$API/v1/branches" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+```
+
 ```bash
 NEWMAIL="yeni-$(date +%s%N)@demo.test"
 curl -X POST "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"fullName\":\"Yeni Kassir\",\"password\":\"Ilkin-Parol-2026\",\"roles\":[{\"role\":\"cashier\"}]}"
 ```
 
-`roles[].branchId` verilməsə rol **bütün filiallar** üçün keçərlidir. Eyni e-poçt ikinci dəfə → `409 user.email_exists`.
+`roles[].branchId` verilməsə rol **bütün filiallar** üçün keçərlidir; verilsə istifadəçinin token-ində yalnız həmin filial olur (`branch` claim). Eyni e-poçt ikinci dəfə → `409 user.email_exists`.
 
 ```bash
 curl "$API/v1/users?limit=5" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"

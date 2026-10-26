@@ -47,6 +47,7 @@ public sealed class GatewayTests : IAsyncLifetime
     [InlineData("/v1/users", "identity")]
     [InlineData("/v1/users/6f1c/roles", "identity")]
     [InlineData("/v1/roles", "identity")]
+    [InlineData("/v1/branches", "identity")]
     [InlineData("/v1/roles/cashier/permissions", "identity")]
     [InlineData("/v1/patients", "clinic-core")]
     [InlineData("/v1/patients/6f1c/odontogram/16/history", "clinic-core")]

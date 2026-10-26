@@ -25,6 +25,8 @@ public sealed record RoleRow(string Code, string Name, bool IsSystem, IReadOnlyL
 
 public sealed record PermissionInfo(string Code, string? Description);
 
+public sealed record BranchInfo(Guid Id, string Code, string Name);
+
 public sealed record UserRow(Guid Id, string FullName, byte[] EmailEnc, string Status, DateTimeOffset? LastLoginAt, bool TwoFactorEnabled, IReadOnlyList<RoleAssignment> Roles);
 
 /// <summary>İstifadəçi/rol idarəetməsi üçün oxu və rol cədvəllərinin yazısı (user_roles, role_permissions EF-də xəritələnmir).</summary>
@@ -38,6 +40,9 @@ public interface IUserAdminStore
     Task<IReadOnlyList<RoleRow>> ListRolesAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<PermissionInfo>> ListPermissionsAsync(CancellationToken cancellationToken);
+
+    /// <summary>Aktiv filiallar (koda görə).</summary>
+    Task<IReadOnlyList<BranchInfo>> ListBranchesAsync(CancellationToken cancellationToken);
 
     /// <summary>Verilənlərdən bazada olmayan rol kodlarını qaytarır.</summary>
     Task<IReadOnlyList<string>> MissingRolesAsync(IReadOnlyCollection<string> roleCodes, CancellationToken cancellationToken);

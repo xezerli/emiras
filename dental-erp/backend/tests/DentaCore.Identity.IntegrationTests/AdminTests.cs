@@ -119,6 +119,7 @@ public sealed class AdminTests : IClassFixture<PostgresFixture>, IDisposable
             (HttpMethod.Get, "/v1/users", null),
             (HttpMethod.Post, "/v1/users", new { email = NewEmail(), fullName = "X Y", password = StrongPassword, roles = new[] { new { role = "reception" } } }),
             (HttpMethod.Get, "/v1/roles", null),
+            (HttpMethod.Get, "/v1/branches", null),
             (HttpMethod.Put, "/v1/roles/hygienist/permissions", new { permissions = Array.Empty<object>() }),
             (HttpMethod.Post, $"/v1/users/{Guid.NewGuid()}/disable", null),
         })
@@ -362,5 +363,24 @@ public sealed class AdminTests : IClassFixture<PostgresFixture>, IDisposable
         await LoginAsync(email, StrongPassword);
         Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(HttpMethod.Patch, $"/v1/users/{Guid.NewGuid()}", admin, new { fullName = "X Y" })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await SendAsync(HttpMethod.Get, $"/v1/users/{Guid.NewGuid()}", admin)).StatusCode);
+    }
+
+    [IntegrationFact]
+    public async Task Branches_are_listed_and_a_user_can_be_limited_to_one_branch()
+    {
+        var (admin, _) = await AdminAsync();
+        var branch = await _db.SeedBranchAsync("t_demo", "Filial Nərimanov");
+        var email = NewEmail();
+
+        var listed = await SendAsync(HttpMethod.Get, "/v1/branches", admin);
+        Assert.Equal(HttpStatusCode.OK, listed.StatusCode);
+        Assert.Contains((await JsonAsync(listed)).EnumerateArray(), b => b.GetProperty("id").GetGuid() == branch && b.GetProperty("name").GetString() == "Filial Nərimanov");
+
+        var created = await SendAsync(HttpMethod.Post, "/v1/users", admin, new { email, fullName = "Filial İşçisi", password = StrongPassword, roles = new[] { new { role = "reception", branchId = branch } } });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        Assert.Equal(branch, (await JsonAsync(created)).GetProperty("roles")[0].GetProperty("branchId").GetGuid());
+
+        var jwt = new JsonWebTokenHandler().ReadJsonWebToken((await LoginAsync(email, StrongPassword)).Access);
+        Assert.Equal([branch.ToString()], jwt.Claims.Where(c => c.Type == "branch").Select(c => c.Value));
     }
 }

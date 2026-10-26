@@ -48,6 +48,10 @@ internal sealed class UserAdminStore(IdentityDbContext db) : IUserAdminStore
         (await db.Database.SqlQuery<PermissionDbRow>($"SELECT code, description FROM permissions ORDER BY code").ToListAsync(cancellationToken))
             .Select(p => new PermissionInfo(p.Code, p.Description)).ToList();
 
+    public async Task<IReadOnlyList<BranchInfo>> ListBranchesAsync(CancellationToken cancellationToken) =>
+        (await db.Database.SqlQuery<BranchDbRow>($"SELECT id, code, name FROM branches WHERE is_active ORDER BY code").ToListAsync(cancellationToken))
+            .Select(b => new BranchInfo(b.Id, b.Code, b.Name)).ToList();
+
     public async Task<IReadOnlyList<string>> MissingRolesAsync(IReadOnlyCollection<string> roleCodes, CancellationToken cancellationToken)
     {
         var codes = roleCodes.ToArray();
@@ -102,6 +106,8 @@ internal sealed class UserAdminStore(IdentityDbContext db) : IUserAdminStore
     private sealed record UserDbRow(Guid Id, string FullName, byte[] EmailEnc, string Status, DateTimeOffset? LastLoginAt, bool TwoFactorEnabled);
 
     private sealed record UserRoleDbRow(Guid UserId, string Role, Guid? BranchId);
+
+    private sealed record BranchDbRow(Guid Id, string Code, string Name);
 
     private sealed record RoleDbRow(string Code, string Name, bool IsSystem);
 

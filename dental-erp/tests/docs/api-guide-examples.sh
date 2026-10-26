@@ -75,6 +75,12 @@ curl "$API/v1/patients/$PATIENT?reveal=true" -H "X-Tenant: $TENANT" -H "Authoriz
 expect 200 "$(status)" "reveal=true (patient:read_sensitive + audit)"
 expect "$PHONE" "$(field 'd["phone"]')" "maskasız telefon"
 
+# Səhifələmə nümunəsi ən azı 3 pasiyent tələb edir: təmiz bazada skript özü doldurur (bələdçidə göstərilmir)
+for i in 1 2 3; do
+  curl -X POST "$API/v1/patients?confirmDuplicate=true" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"branchId\":\"$BRANCH\",\"firstName\":\"Siyahı$i\",\"lastName\":\"Nümunə\"}"
+  expect 201 "$(status)" "siyahı üçün pasiyent $i"
+done
+
 curl "$API/v1/patients?limit=2" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
 expect 200 "$(status)" "pasiyent siyahısı"
 CURSOR="$(field 'd["nextCursor"]')"
@@ -158,6 +164,10 @@ curl "$API/v1/dashboard/summary" -H "X-Tenant: $TENANT" -H "Authorization: Beare
 expect 200 "$(status)" "dashboard"
 
 # ---------- 6b. İstifadəçi və rolların idarəsi (user:manage) ----------
+curl "$API/v1/branches" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+expect 200 "$(status)" "filiallar siyahısı"
+expect "$BRANCH" "$(field 'd[0]["id"]')" "ilk filial /auth/me ilə eynidir"
+
 NEWMAIL="yeni-$(date +%s%N)@demo.test"
 curl -X POST "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"fullName\":\"Yeni Kassir\",\"password\":\"Ilkin-Parol-2026\",\"roles\":[{\"role\":\"cashier\"}]}"
 expect 201 "$(status)" "istifadəçi yaradıldı"

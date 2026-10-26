@@ -728,6 +728,15 @@ paths:
         '204': { description: Parol dəyişdi }
         '404': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
+  /branches:
+    get:
+      operationId: getBranches
+      tags: [Admin]
+      summary: Aktiv filiallar (koda görə). İstifadəçiyə rol təyin edərkən filial seçmək üçün
+      x-permission: user:manage
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Branch' } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
   /roles:
     get:
       operationId: getRoles
@@ -1373,6 +1382,13 @@ components:
         applied: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entityId: { type: string, format: uuid }, rowVersion: { type: [integer, 'null'] } } } }
         conflicts: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entity: { type: string }, entityId: { type: string, format: uuid }, serverVersion: { type: [integer, 'null'] }, serverData: { type: [object, 'null'], additionalProperties: true }, resolution: { type: string, enum: [needs_manual] } } } }
         rejected: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, code: { type: string }, message: { type: [string, 'null'] } } } }
+    Branch:
+      type: object
+      required: [id, code, name]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
     RoleAssignment:
       type: object
       required: [role]

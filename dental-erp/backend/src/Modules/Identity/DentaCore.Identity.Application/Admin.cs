@@ -26,6 +26,18 @@ public static class PasswordPolicy
             .WithMessage($"Password must be at least {MinLength} characters and contain a letter and a digit.");
 }
 
+// ---------------- Filiallar ----------------
+public sealed record ListBranchesQuery : IQuery<IReadOnlyList<BranchInfo>>, IRequiresAccess
+{
+    public string Permission => AdminPermissions.UserManage;
+}
+
+internal sealed class ListBranchesQueryHandler(IUserAdminStore store) : IRequestHandler<ListBranchesQuery, IReadOnlyList<BranchInfo>>
+{
+    public async Task<Result<IReadOnlyList<BranchInfo>>> Handle(ListBranchesQuery request, CancellationToken cancellationToken) =>
+        Result<IReadOnlyList<BranchInfo>>.Success(await store.ListBranchesAsync(cancellationToken));
+}
+
 // ---------------- Rollar ----------------
 public sealed record RoleDto(string Code, string Name, bool IsSystem, bool Editable, IReadOnlyList<RoleGrant> Permissions);
 

@@ -968,6 +968,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/branches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Aktiv filiallar (koda görə). İstifadəçiyə rol təyin edərkən filial seçmək üçün */
+        get: operations["getBranches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/roles": {
         parameters: {
             query?: never;
@@ -1892,6 +1909,12 @@ export interface components {
                 code?: string;
                 message?: string | null;
             }[];
+        };
+        Branch: {
+            /** Format: uuid */
+            id: string;
+            code: string;
+            name: string;
         };
         RoleAssignment: {
             /** @example reception */
@@ -3738,6 +3761,27 @@ export interface operations {
             };
             404: components["responses"]["Problem"];
             422: components["responses"]["Problem"];
+        };
+    };
+    getBranches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Branch"][];
+                };
+            };
+            403: components["responses"]["Problem"];
         };
     };
     getRoles: {

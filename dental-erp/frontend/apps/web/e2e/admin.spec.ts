@@ -17,11 +17,12 @@ test("admin creates a user from the UI, the user signs in with the role's permis
   await expect(page.getByRole("button", { name: "Yarat" })).toBeDisabled();
   await page.getByLabel("İlkin parol").fill(password);
   await page.getByLabel("Rol", { exact: true }).selectOption({ label: "Kassir" });
+  await page.getByLabel("Filial").selectOption({ label: "Mərkəz" });
   await page.getByRole("button", { name: "Yarat" }).click();
   await expect(page.getByText("İstifadəçi yaradıldı.")).toBeVisible();
   const row = page.getByRole("row", { name: new RegExp(name) });
   await expect(row).toBeVisible();
-  await expect(row.getByText("Kassir")).toBeVisible();
+  await expect(row.getByText("Kassir (Mərkəz)")).toBeVisible();
   await expect(row.getByText(email)).toHaveCount(0);   // e-poçt maskalanır
 
   // Yeni istifadəçi: kassir yalnız Maliyyə bölməsini görür, idarəetmə yoxdur

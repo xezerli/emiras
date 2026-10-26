@@ -98,6 +98,9 @@ users.MapPost("/{id:guid}/enable", async (Guid id, ISender sender, CancellationT
 users.MapPost("/{id:guid}/reset-password", async (Guid id, ResetPasswordRequest body, ISender sender, CancellationToken ct) =>
     (await sender.Send(new ResetPasswordCommand(id, body.NewPassword), ct)).ToHttpResult(_ => Results.NoContent()));
 
+app.MapGet("/v1/branches", async (ISender sender, CancellationToken ct) =>
+    (await sender.Send(new ListBranchesQuery(), ct)).ToHttpResult(Results.Ok)).RequireAuthorization();
+
 var roles = app.MapGroup("/v1/roles").RequireAuthorization();
 
 roles.MapGet("/", async (ISender sender, CancellationToken ct) =>

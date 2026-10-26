@@ -10,17 +10,18 @@ import { problemMessage, useApi } from "@/shared/useApi";
 
 type User = components["schemas"]["User"];
 type Role = components["schemas"]["Role"];
+type Branch = components["schemas"]["Branch"];
 
-function CreateUser({ roles, onDone }: { roles: Role[]; onDone: () => void }) {
+function CreateUser({ roles, branches, onDone }: { roles: Role[]; branches: Branch[]; onDone: () => void }) {
   const client = useApi();
-  const [f, setF] = useState({ email: "", fullName: "", password: "", role: "" });
+  const [f, setF] = useState({ email: "", fullName: "", password: "", role: "", branch: "" });
   const [error, setError] = useState<string>();
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF((s) => ({ ...s, [k]: e.target.value }));
   const passwordError = f.password ? passwordProblem(f.password) : undefined;
   const create = useMutation({
     mutationFn: async () => {
       const res = await client.POST("/users", {
-        body: { email: f.email.trim(), fullName: f.fullName.trim(), password: f.password, roles: [{ role: f.role, branchId: null }] },
+        body: { email: f.email.trim(), fullName: f.fullName.trim(), password: f.password, roles: [{ role: f.role, branchId: f.branch || null }] },
       });
       if (!res.response.ok) throw toApiError(res.error, res.response);
     },
@@ -49,6 +50,13 @@ function CreateUser({ roles, onDone }: { roles: Role[]; onDone: () => void }) {
           <select id="new-role" value={f.role} onChange={set("role")} required>
             <option value="">Seçin</option>
             {roles.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="new-branch">Filial</label>{" "}
+          <select id="new-branch" value={f.branch} onChange={set("branch")}>
+            <option value="">Bütün filiallar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
         <Button type="submit" loading={create.isPending} disabled={!valid}>Yarat</Button>
@@ -136,6 +144,7 @@ export default function UsersPage() {
   const [error, setError] = useState<string>();
 
   const roles = useQuery({ queryKey: ["roles"], queryFn: async () => unwrap(await client.GET("/roles")) });
+  const branches = useQuery({ queryKey: ["branches"], queryFn: async () => unwrap(await client.GET("/branches")) });
   const users = useInfiniteQuery({
     queryKey: ["users"],
     initialPageParam: undefined as string | undefined,
@@ -154,6 +163,9 @@ export default function UsersPage() {
   const items = users.data?.pages.flatMap((p) => p.items) ?? [];
   const roleList = roles.data?.roles ?? [];
   const roleName = (code: string) => roleList.find((r) => r.code === code)?.name ?? code;
+  const branchName = (id: string) => branches.data?.find((b) => b.id === id)?.name ?? "filial";
+  // Filial məhdudiyyəti olan rol "Rol (Filial)" kimi göstərilir; məhdudiyyətsiz rol bütün filialları əhatə edir
+  const roleLabel = (r: { role: string; branchId?: string | null }) => (r.branchId ? `${roleName(r.role)} (${branchName(r.branchId)})` : roleName(r.role));
 
   return (
     <>
@@ -164,6 +176,7 @@ export default function UsersPage() {
       {creating && (
         <CreateUser
           roles={roleList}
+          branches={branches.data ?? []}
           onDone={() => { setCreating(false); setNotice("İstifadəçi yaradıldı."); void qc.invalidateQueries({ queryKey: ["users"] }); }}
         />
       )}
@@ -187,7 +200,7 @@ export default function UsersPage() {
                 <tr key={u.id}>
                   <th scope="row">{u.fullName}</th>
                   <td>{u.email}</td>
-                  <td>{u.roles.map((r) => roleName(r.role)).join(", ")}</td>
+                  <td>{u.roles.map(roleLabel).join(", ")}</td>
                   <td><Badge tone={st.tone}>{st.label}</Badge></td>
                   <td>{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : "—"}</td>
                   <td>

@@ -160,7 +160,7 @@ Bu bölmələr yalnız **Direktor** və **Klinik Administrator** rollarında gö
 
 ![İstifadəçilər siyahısı: status, rollar və əməliyyat düymələri](img/12-users.png)
 
-- **Yeni istifadəçi:** e-poçt, ad, rol və **ilkin parol** daxil edin (ən azı 10 simvol, hərf və rəqəm). Sistem dəvət e-poçtu **göndərmir**: parolu işçiyə təhlükəsiz yolla özünüz çatdırın. Rol bütün filiallara təyin olunur (filial seçimi hələ ekranda yoxdur).
+- **Yeni istifadəçi:** e-poçt, ad, rol və **ilkin parol** daxil edin (ən azı 10 simvol, hərf və rəqəm). Sistem dəvət e-poçtu **göndərmir**: parolu işçiyə təhlükəsiz yolla özünüz çatdırın. **Filial** seçsəniz işçi yalnız həmin filialın məlumatını görür; seçməsəniz rol bütün filiallara aiddir.
 - **Rollar:** işçinin rollarını dəyişir. Saxlayanda işçinin açıq sessiyaları bağlanır və yeni icazələr növbəti girişdən sonra qüvvəyə minir.
 - **Parol:** yeni parol təyin edir (köhnə parol və bütün sessiyalar ləğv olunur).
 - **Söndür / Aç:** söndürülmüş işçi girə bilmir (sessiyaları bağlanır). **Bloklanıb** statusu ardıcıl 5 yanlış parol cəhdindən sonra 15 dəqiqəlik avtomatik bloku göstərir; **Aç** onu dərhal təmizləyir.
