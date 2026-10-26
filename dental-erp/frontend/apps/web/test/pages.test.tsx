@@ -316,3 +316,144 @@ describe("patient card", async () => {
     expect(calls.some((c) => path(c).endsWith("/medical-profile"))).toBe(false);
   });
 });
+
+describe("user administration pages", async () => {
+  const { default: UsersPage } = await import("@/app/(app)/users/page");
+  const { default: RolesPage } = await import("@/app/(app)/roles/page");
+
+  const roles = {
+    roles: [
+      { code: "director", name: "Direktor", isSystem: true, editable: false, permissions: [{ permission: "patient:read", scope: "tenant", maxAmount: null }] },
+      { code: "cashier", name: "Kassir", isSystem: true, editable: true, permissions: [{ permission: "invoice:refund", scope: "branch", maxAmount: 0 }] },
+      { code: "hygienist", name: "Gigiyenist", isSystem: true, editable: true, permissions: [] },
+    ],
+    permissions: [
+      { code: "patient:read", description: "Pasiyentə baxış" },
+      { code: "invoice:refund", description: "Geri qaytarma" },
+      { code: "user:manage", description: "İstifadəçi idarəsi" },
+    ],
+  };
+  const aysel = { id: "u1", fullName: "Aysel Əliyeva", email: "a***@clinic.az", status: "active", lastLoginAt: null, twoFactorEnabled: false, roles: [{ role: "cashier", branchId: null }] };
+  const locked = { id: "u2", fullName: "Murad Quliyev", email: "m***@clinic.az", status: "locked", lastLoginAt: "2026-10-26T10:00:00Z", twoFactorEnabled: false, roles: [{ role: "hygienist", branchId: null }] };
+  const sign = (r: Request) => `${r.method} ${path(r)}`;
+
+  it("lists users with role names and status, and offers enable for a locked account and none to disable yourself", async () => {
+    perms = ["user:manage"];
+    handler = (r) => (path(r) === "/roles" ? json(200, roles) : json(200, { items: [{ ...aysel, id: "u" }, locked], nextCursor: null }));
+    renderWithQuery(<UsersPage />);
+    expect(await screen.findByText("Murad Quliyev")).toBeInTheDocument();
+    expect(screen.getAllByText("Kassir").length).toBeGreaterThan(0);
+    expect(screen.getByText("Bloklanıb")).toBeInTheDocument();
+    // mockAuth istifadəçisinin id-si "u"-dur: öz sətri üçün söndürmə və rol dəyişmə bağlıdır
+    expect(screen.getByRole("button", { name: "Söndür: Aysel Əliyeva" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Rolları dəyiş: Aysel Əliyeva" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Aç: Murad Quliyev" })).toBeEnabled();
+  });
+
+  it("enables a locked account", async () => {
+    perms = ["user:manage"];
+    handler = (r) => {
+      if (path(r) === "/roles") return json(200, roles);
+      if (r.method === "POST") return json(200, { ...locked, status: "active" });
+      return json(200, { items: [locked], nextCursor: null });
+    };
+    renderWithQuery(<UsersPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Aç: Murad Quliyev" }));
+    await waitFor(() => expect(calls.map(sign)).toContain("POST /users/u2/enable"));
+  });
+
+  it("creates a user, checks the password locally and maps a duplicate-email error", async () => {
+    perms = ["user:manage"];
+    let status = 201;
+    handler = (r) => {
+      if (path(r) === "/roles") return json(200, roles);
+      if (r.method === "POST") return status === 201 ? json(201, aysel) : json(409, { code: "user.email_exists" });
+      return json(200, { items: [], nextCursor: null });
+    };
+    renderWithQuery(<UsersPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Yeni istifadəçi" }));
+    await userEvent.type(screen.getByLabelText("E-poçt"), "yeni@clinic.az");
+    await userEvent.type(screen.getByLabelText("Ad Soyad"), "Yeni İşçi");
+    await userEvent.selectOptions(screen.getByLabelText("Rol"), "cashier");
+    await userEvent.type(screen.getByLabelText("İlkin parol"), "short1");
+    expect(screen.getByRole("button", { name: "Yarat" })).toBeDisabled();
+    expect(screen.getByText("Parol ən azı 10 simvol olmalıdır.")).toBeInTheDocument();
+
+    await userEvent.clear(screen.getByLabelText("İlkin parol"));
+    await userEvent.type(screen.getByLabelText("İlkin parol"), "Str0ng-Passw0rd");
+    status = 409;
+    await userEvent.click(screen.getByRole("button", { name: "Yarat" }));
+    expect(await screen.findByText("Bu e-poçt ilə istifadəçi artıq var.")).toBeInTheDocument();
+
+    status = 201;
+    await userEvent.click(screen.getByRole("button", { name: "Yarat" }));
+    expect(await screen.findByText("İstifadəçi yaradıldı.")).toBeInTheDocument();
+    const post = calls.filter((c) => sign(c) === "POST /users").at(-1)!;
+    expect(await post.json()).toEqual({ email: "yeni@clinic.az", fullName: "Yeni İşçi", password: "Str0ng-Passw0rd", roles: [{ role: "cashier", branchId: null }] });
+  });
+
+  it("replaces a user's roles keeping existing branches", async () => {
+    perms = ["user:manage"];
+    handler = (r) => {
+      if (path(r) === "/roles") return json(200, roles);
+      if (r.method === "PUT") return json(200, locked);
+      return json(200, { items: [locked], nextCursor: null });
+    };
+    renderWithQuery(<UsersPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Rolları dəyiş: Murad Quliyev" }));
+    await userEvent.click(await screen.findByLabelText("Kassir"));
+    await userEvent.click(screen.getByRole("button", { name: "Saxla" }));
+    await waitFor(() => expect(calls.map(sign)).toContain("PUT /users/u2/roles"));
+    const put = calls.find((c) => sign(c) === "PUT /users/u2/roles")!;
+    expect(await put.json()).toEqual({ roles: [{ role: "hygienist", branchId: null }, { role: "cashier", branchId: null }] });
+  });
+
+  it("resets a password only when it meets the policy", async () => {
+    perms = ["user:manage"];
+    handler = (r) => (path(r) === "/roles" ? json(200, roles) : r.method === "POST" ? new Response(null, { status: 204 }) : json(200, { items: [locked], nextCursor: null }));
+    renderWithQuery(<UsersPage />);
+    await userEvent.click(await screen.findByRole("button", { name: "Parolu sıfırla: Murad Quliyev" }));
+    await userEvent.type(screen.getByLabelText("Yeni parol"), "weak");
+    expect(screen.getByRole("button", { name: "Sıfırla" })).toBeDisabled();
+    await userEvent.clear(screen.getByLabelText("Yeni parol"));
+    await userEvent.type(screen.getByLabelText("Yeni parol"), "Another-Passw0rd");
+    await userEvent.click(screen.getByRole("button", { name: "Sıfırla" }));
+    expect(await screen.findByText("Parol dəyişdi, sessiyalar bağlandı.")).toBeInTheDocument();
+    expect(await calls.find((c) => sign(c) === "POST /users/u2/reset-password")!.json()).toEqual({ newPassword: "Another-Passw0rd" });
+  });
+
+  it("shows administrator roles read-only and saves an edited role without user:manage", async () => {
+    perms = ["user:manage"];
+    handler = (r) => (r.method === "PUT" ? json(200, roles.roles[1]) : json(200, roles));
+    renderWithQuery(<RolesPage />);
+    expect(await screen.findByText("Bu rol dəyişdirilə bilməz")).toBeInTheDocument();
+    expect(screen.getByLabelText("patient:read icazəsi")).toBeChecked();
+    expect(screen.getByLabelText("patient:read icazəsi")).toBeDisabled();
+    expect(screen.queryByLabelText("user:manage icazəsi")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Saxla" })).not.toBeInTheDocument();
+
+    await userEvent.selectOptions(screen.getByLabelText("Rol"), "cashier");
+    await userEvent.click(screen.getByLabelText("patient:read icazəsi"));
+    await userEvent.selectOptions(screen.getByLabelText("patient:read əhatəsi"), "own");
+    await userEvent.type(screen.getByLabelText("Geri qaytarma limiti"), "5");
+    await userEvent.click(screen.getByRole("button", { name: "Saxla" }));
+    expect(await screen.findByText(/İcazələr saxlandı/)).toBeInTheDocument();
+    const put = calls.find((c) => sign(c) === "PUT /roles/cashier/permissions")!;
+    expect(await put.json()).toEqual({
+      permissions: [
+        { permission: "invoice:refund", scope: "branch", maxAmount: 5 },
+        { permission: "patient:read", scope: "own", maxAmount: null },
+      ],
+    });
+  });
+
+  it("maps a protected-role rejection", async () => {
+    perms = ["user:manage"];
+    handler = (r) => (r.method === "PUT" ? json(409, { code: "role.protected" }) : json(200, roles));
+    renderWithQuery(<RolesPage />);
+    await userEvent.selectOptions(await screen.findByLabelText("Rol"), "hygienist");
+    await userEvent.click(screen.getByLabelText("patient:read icazəsi"));
+    await userEvent.click(screen.getByRole("button", { name: "Saxla" }));
+    expect(await screen.findByText("İdarəçi rolları dəyişdirilə bilməz.")).toBeInTheDocument();
+  });
+});

@@ -34,7 +34,7 @@ PII açarları (`Security:PiiEncryptionKey`, `PiiHashKey`) **yalnız mühit dəy
 - Hər əmr/sorğu mediator pipeline-ında icazə yoxlamasından keçir (`IRequiresAccess`): yoxlama **serverdədir**, UI menyusu yalnız rahatlıqdır.
 - Başqa filialın/tenant-ın qeydi **404** qaytarır (varlığı sızmır), 403 yox.
 - **Default-deny:** hər host üçün avtorizasiyasız marşrutların siyahısı testdə dəqiq sabitlənib (`GET /health`, `/health/ready`; Identity-də `login`, `refresh`). Yeni endpoint `RequireAuthorization()`-sız qalsa test düşür.
-- Hazırkı rol icazələri: [user-guide §2](user-guide.md#2-naviqasiya-və-rollar). **5 rolun icazəsi boşdur.**
+- Hazırkı rol icazələri: [user-guide §2](user-guide.md#2-naviqasiya-və-rollar). 5 rolun icazəsi susmaya görə boşdur, idarəçi onları `/roles` ekranından təyin edir. `director` və `clinic_admin` redaktə olunmur; `user:manage` başqa rola verilə bilməz (icazə genişləndirmə qorunması); öz hesabını söndürmək/öz rolunu dəyişmək qadağandır; söndürmə, rol dəyişikliyi və parol sıfırlama sessiyaları bağlayır. Bütün bu əməliyyatlar auditdədir (`user.*`, `role.permissions.set`).
 
 ## 4. Tenant izolyasiyası
 

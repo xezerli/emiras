@@ -157,6 +157,48 @@ expect 1 "$(field 'len(d["payments"])')" "tək ödəniş sətri"
 curl "$API/v1/dashboard/summary" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
 expect 200 "$(status)" "dashboard"
 
+# ---------- 6b. İstifadəçi və rolların idarəsi (user:manage) ----------
+NEWMAIL="yeni-$(date +%s%N)@demo.test"
+curl -X POST "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"fullName\":\"Yeni Kassir\",\"password\":\"Ilkin-Parol-2026\",\"roles\":[{\"role\":\"cashier\"}]}"
+expect 201 "$(status)" "istifadəçi yaradıldı"
+NEWID="$(field 'd["id"]')"
+expect active "$(field 'd["status"]')" "yeni hesab aktivdir"
+expect True "$(field '"@" in d["email"] and d["email"] != "'"$NEWMAIL"'"')" "cavabda e-poçt maskalıdır"
+
+curl -X POST "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"fullName\":\"Təkrar\",\"password\":\"Ilkin-Parol-2026\",\"roles\":[{\"role\":\"cashier\"}]}"
+expect 409 "$(status)" "eyni e-poçt ikinci dəfə: 409"
+expect user.email_exists "$(field 'd["code"]')" "user.email_exists"
+
+curl "$API/v1/users?limit=5" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+expect 200 "$(status)" "istifadəçi siyahısı"
+
+curl -X PUT "$API/v1/users/$NEWID/roles" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"roles":[{"role":"reception"}]}'
+expect 200 "$(status)" "rollar əvəz olundu"
+expect reception "$(field 'd["roles"][0]["role"]')" "yeni rol reception"
+
+curl -X POST "$API/v1/users/$NEWID/reset-password" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"newPassword":"Yeni-Parol-2026"}'
+expect 204 "$(status)" "parol sıfırlandı"
+
+curl -X POST "$API/v1/users/$NEWID/disable" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+expect 200 "$(status)" "hesab söndürüldü"
+expect disabled "$(field 'd["status"]')" "status=disabled"
+curl -X POST "$API/v1/auth/login" -H "X-Tenant: $TENANT" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"password\":\"Yeni-Parol-2026\"}"
+expect 403 "$(status)" "söndürülmüş hesab girə bilmir"
+expect auth.account_disabled "$(field 'd["code"]')" "auth.account_disabled"
+
+curl "$API/v1/roles" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+expect 200 "$(status)" "rollar və icazələr"
+
+curl -X PUT "$API/v1/roles/hygienist/permissions" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"permissions":[{"permission":"patient:read","scope":"branch"},{"permission":"appointment:read","scope":"branch"}]}'
+expect 200 "$(status)" "rolun icazələri əvəz olundu"
+
+curl -X PUT "$API/v1/roles/clinic_admin/permissions" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"permissions":[]}'
+expect 409 "$(status)" "idarəçi rolu dəyişmir"
+expect role.protected "$(field 'd["code"]')" "role.protected"
+
+curl "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $DOCTOR_TOKEN"
+expect 403 "$(status)" "həkim istifadəçiləri idarə edə bilməz"
+
 # ---------- 7. İcazə: həkim maliyyə əməliyyatı edə bilməz ----------
 curl -X POST "$API/v1/invoices/$INVOICE/payments" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $DOCTOR_TOKEN" -H "Content-Type: application/json" -H "Idempotency-Key: $(uuid)" -d '{"method":"card","amount":5}'
 expect 403 "$(status)" "icazəsiz rol: 403"

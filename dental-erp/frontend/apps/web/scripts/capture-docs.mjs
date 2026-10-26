@@ -65,6 +65,12 @@ for (const [k, [patient, svc, pay]] of Object.entries({ paid: [ids[1], filling, 
   shot[k] = inv.id;
 }
 
+// idarəetmə ekranı üçün saxta işçilər (biri uğursuz girişlərdən bloklanır)
+for (const [email, fullName, role] of [["nermin.huseynova@demo.test", "Nərmin Hüseynova", "cashier"], ["kamran.aliyev@demo.test", "Kamran Əliyev", "hygienist"]]) {
+  await call(admin, "POST", "/users", { email, fullName, password: "Ilkin-Parol-2026", roles: [{ role }] });
+}
+for (let i = 0; i < 5; i++) await call(undefined, "POST", "/auth/login", { email: "kamran.aliyev@demo.test", password: "sehv-parol-123" });
+
 // ---------------- Next.js + brauzer ----------------
 const server = spawn("pnpm", ["exec", "next", "start", "-p", String(PORT), "-H", "127.0.0.1"], {
   env: { ...process.env, API_ORIGIN: API, DEV_TENANT: TENANT }, stdio: "ignore",
@@ -140,6 +146,15 @@ try {
   const reception = await newPage("light");
   await signIn(reception, "reception");
   await snap(reception, "11-reception-role");
+
+  await page.goto(`${base}/users`);
+  await page.getByRole("row").filter({ hasText: "Nərmin" }).waitFor();
+  await snap(page, "12-users");
+
+  await page.goto(`${base}/roles`);
+  await page.getByLabel("Rol", { exact: true }).selectOption({ label: "Kassir" });
+  await page.getByLabel("invoice:refund icazəsi").waitFor();
+  await snap(page, "13-roles");
 } finally {
   await browser.close();
   server.kill();

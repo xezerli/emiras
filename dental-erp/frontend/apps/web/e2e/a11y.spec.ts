@@ -9,6 +9,8 @@ const pages = [
   ["new patient", "/patients/new"],
   ["calendar", "/calendar"],
   ["billing", "/billing"],
+  ["users", "/users"],
+  ["roles", "/roles"],
 ] as const;
 
 for (const theme of ["light", "dark"] as const) {
@@ -18,7 +20,7 @@ for (const theme of ["light", "dark"] as const) {
       if (path === "/login") {
         await page.goto(path);
       } else {
-        if (!page.url().includes("/dashboard") && !page.url().includes("/patients") && !page.url().includes("/calendar") && !page.url().includes("/billing")) await loginAndWaitForDashboard(page);
+        if (!page.url().includes("/dashboard") && !page.url().includes("/patients") && !page.url().includes("/calendar") && !page.url().includes("/billing") && !page.url().includes("/users") && !page.url().includes("/roles")) await loginAndWaitForDashboard(page);
         await page.goto(path);
         await expect(page.getByRole("navigation", { name: "Əsas naviqasiya" })).toBeVisible();
       }

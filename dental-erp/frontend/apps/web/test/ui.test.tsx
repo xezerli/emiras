@@ -16,6 +16,7 @@ describe("permissions", () => {
 
   it("shows only navigation the user may open", () => {
     expect(visibleNav(perms).map((n) => n.href)).toEqual(["/patients", "/billing"]);
+    expect(visibleNav([{ code: "user:manage", scope: "tenant" }]).map((n) => n.href)).toEqual(["/users", "/roles"]);
     expect(visibleNav([])).toEqual([]);
     expect(visibleNav(undefined)).toEqual([]);
   });

@@ -50,7 +50,7 @@ Aşağıdakı cədvəl bazadakı başlanğıc (seed) icazələrdən avtomatik ç
 | settings:manage | · | tenant | tenant | · | · |
 | user:manage | · | tenant | tenant | · | · |
 
-**Diqqət:** `manager`, `hygienist`, `lab`, `radiology`, `finance` rolları sistemdə **mövcuddur, amma heç bir icazəsi yoxdur**: bu rollarla daxil olan istifadəçi heç nə görə bilməz. Rolların icazələrini klinika üçün təyin etmək hələ yalnız verilənlər bazası səviyyəsində mümkündür (idarəetmə ekranı yoxdur). Kassirin geri qaytarma limiti 0-dır: kassir ödəniş qəbul edir, amma geri qaytara bilmir.
+**Diqqət:** `manager`, `hygienist`, `lab`, `radiology`, `finance` rolları sistemdə **mövcuddur, amma heç bir icazəsi yoxdur**: bu rollarla daxil olan istifadəçi heç nə görə bilməz. Rolların icazələrini idarəçi **Rollar** ekranından təyin edir (bax [§9](#9-rollar-və-istifadəçilərin-idarəsi-idarəçi-üçün)). Kassirin geri qaytarma limiti 0-dır: kassir ödəniş qəbul edir, amma geri qaytara bilmir.
 
 Reception rolu ilə daxil olanda menyu belə görünür (İdarə paneli yoxdur, sistem ilk əlçatan bölməyə yönləndirir):
 
@@ -151,3 +151,30 @@ Texniki təfərrüat: [security-and-privacy.md](security-and-privacy.md).
 | "Çox sayda sorğu. Bir az gözləyin." | Qısa müddət gözləyin (sistem sürətə məhdudiyyət qoyur) |
 | "Sizə filial təyin olunmayıb." | İstifadəçiyə heç bir filial verilməyib: IT/rəhbərliyə müraciət |
 | Giriş etmədən səhifə "Giriş" ekranına qayıdır | Sessiya bitib: yenidən daxil olun |
+
+## 9. Rollar və istifadəçilərin idarəsi (idarəçi üçün)
+
+Bu bölmələr yalnız **Direktor** və **Klinik Administrator** rollarında görünür (`user:manage` icazəsi). Menyuda **İstifadəçilər** və **Rollar** var.
+
+### İstifadəçilər
+
+![İstifadəçilər siyahısı: status, rollar və əməliyyat düymələri](img/12-users.png)
+
+- **Yeni istifadəçi:** e-poçt, ad, rol və **ilkin parol** daxil edin (ən azı 10 simvol, hərf və rəqəm). Sistem dəvət e-poçtu **göndərmir**: parolu işçiyə təhlükəsiz yolla özünüz çatdırın. Rol bütün filiallara təyin olunur (filial seçimi hələ ekranda yoxdur).
+- **Rollar:** işçinin rollarını dəyişir. Saxlayanda işçinin açıq sessiyaları bağlanır və yeni icazələr növbəti girişdən sonra qüvvəyə minir.
+- **Parol:** yeni parol təyin edir (köhnə parol və bütün sessiyalar ləğv olunur).
+- **Söndür / Aç:** söndürülmüş işçi girə bilmir (sessiyaları bağlanır). **Bloklanıb** statusu ardıcıl 5 yanlış parol cəhdindən sonra 15 dəqiqəlik avtomatik bloku göstərir; **Aç** onu dərhal təmizləyir.
+- Öz sətrinizdə **Rollar** və **Söndür** bağlıdır: heç kim özünü sistemdən kilidləyə bilməz.
+- E-poçt siyahıda maskalıdır (`d***@demo.test`).
+
+### Rollar
+
+![Rolun icazələri: hər icazə üçün əhatə və pul limiti](img/13-roles.png)
+
+Rolu seçin, işçilərə verilməli icazələri qeyd edin və hər icazənin **əhatəsini** seçin: *Yalnız özünün*, *Filial* və ya *Bütün klinika*. **Geri qaytarma** icazəsində pul limiti var (boş = limitsiz, `0` = geri qaytara bilməz).
+
+- **Direktor** və **Klinik Administrator** dəyişdirilə bilməz (həmişə tam icazəlidir).
+- İdarəetmə icazəsi (`user:manage`) heç bir başqa rola verilə bilməz.
+- Menecer, Gigiyenist, Laboratoriya, Rentgen və Maliyyə rolları **susmaya görə boşdur**: işçi bu rolla daxil olanda heç nə görmür. Bu rolları istifadə etməzdən əvvəl icazələrini burada təyin edin.
+- Dəyişiklik mövcud girişlərə ən çox 10 dəqiqə sonra tam çatır; ani təsir üçün işçini çıxıb yenidən daxil olmağa yönləndirin.
+- Hər dəyişiklik auditdə qeyd olunur.

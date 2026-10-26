@@ -4,6 +4,7 @@ import { PaymentAttempt, parseAmount, recordPayment } from "@/features/billing/p
 import { actionsFor, dayRange, todayLocal } from "@/features/calendar/day";
 import { registerPatient } from "@/features/patients/register";
 import { findPatients } from "@/features/patients/search";
+import { HAS_LIMIT, nextAssignments, passwordProblem, toDraft, toGrants } from "@/features/users/admin";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -124,3 +125,33 @@ describe("calendar helpers", () => {
 });
 
 void vi;
+
+describe("user administration helpers", () => {
+  it("mirrors the server password policy", () => {
+    expect(passwordProblem("short1")).toMatch(/10/);
+    expect(passwordProblem("onlyletters-here")).toMatch(/rəqəm/);
+    expect(passwordProblem("12345678901234")).toMatch(/hərf/);
+    expect(passwordProblem("Str0ng-Passw0rd")).toBeUndefined();
+  });
+
+  it("keeps the branch of roles that stay and gives new roles all branches", () => {
+    const current = [{ role: "doctor", branchId: "b1" }, { role: "cashier", branchId: null }];
+    expect(nextAssignments(current, ["doctor", "reception"])).toEqual([{ role: "doctor", branchId: "b1" }, { role: "reception", branchId: null }]);
+  });
+
+  it("round-trips a role's grants and only sends a limit for refunds", () => {
+    const role = {
+      code: "cashier", name: "Kassir", isSystem: true, editable: true,
+      permissions: [{ permission: HAS_LIMIT, scope: "branch" as const, maxAmount: 50 }, { permission: "payment:write", scope: "branch" as const, maxAmount: null }],
+    };
+    const draft = toDraft(role);
+    expect(draft[HAS_LIMIT]).toEqual({ scope: "branch", maxAmount: "50" });
+    draft["payment:write"] = { scope: "branch", maxAmount: "999" };
+    expect(toGrants(draft)).toEqual([
+      { permission: HAS_LIMIT, scope: "branch", maxAmount: 50 },
+      { permission: "payment:write", scope: "branch", maxAmount: null },
+    ]);
+    draft[HAS_LIMIT] = { scope: "tenant", maxAmount: "" };
+    expect(toGrants(draft)[0]).toEqual({ permission: HAS_LIMIT, scope: "tenant", maxAmount: null });
+  });
+});

@@ -854,18 +854,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/users": {
+    "/users": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** İstifadəçilər */
-        get: operations["getAdminUsers"];
+        /** İstifadəçilər (ada görə, cursor ilə). E-poçt maskalanır */
+        get: operations["getUsers"];
         put?: never;
-        /** İstifadəçi yarat (dəvət emaili göndərilir) */
-        post: operations["postAdminUsers"];
+        /** İstifadəçi yarat. İlkin parolu idarəçi verir (dəvət e-poçtu göndərilmir); parol ≥10 simvol, hərf və rəqəm */
+        post: operations["postUsers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        /** İstifadəçi */
+        get: operations["getUser"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Göstərilən adı dəyiş */
+        patch: operations["patchUser"];
+        trace?: never;
+    };
+    "/users/{userId}/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Rolları əvəz et (1–10 rol). İstifadəçinin sessiyaları bağlanır; yeni icazələr növbəti girişdən sonra. Öz rolunu dəyişmək olmaz (403 user.self_change) */
+        put: operations["putUserRoles"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{userId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hesabı söndür və bütün sessiyalarını ləğv et. Özünü söndürmək olmaz (403 user.self_change) */
+        post: operations["postUserDisable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{userId}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hesabı aç və müvəqqəti blokunu (uğursuz giriş sayğacı) təmizlə */
+        post: operations["postUserEnable"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{userId}/reset-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Parolu sıfırla (idarəçi yeni parol verir) və bütün sessiyaları ləğv et */
+        post: operations["postUserResetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rollar, hər rolun icazələri və təyin oluna bilən icazələrin siyahısı */
+        get: operations["getRoles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles/{roleCode}/permissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                roleCode: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Rolun icazələrini əvəz et. director və clinic_admin dəyişmir (409 role.protected); user:manage verilə bilməz (422). Mövcud access token-lər ≤10 dəq. köhnə icazə ilə qalır */
+        put: operations["putRolePermissions"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1761,21 +1893,65 @@ export interface components {
                 message?: string | null;
             }[];
         };
-        UserSummary: {
+        RoleAssignment: {
+            /** @example reception */
+            role: string;
+            /**
+             * Format: uuid
+             * @description null = bütün filiallar
+             */
+            branchId?: string | null;
+        };
+        User: {
             /** Format: uuid */
-            id?: string;
-            fullName?: string;
-            specialty?: string;
-            roles?: string[];
-            status?: string;
+            id: string;
+            fullName: string;
+            /** @description Maskalanmış (a***@domen) */
+            email: string;
+            /** @enum {string} */
+            status: "active" | "locked" | "disabled";
+            /** Format: date-time */
+            lastLoginAt?: string | null;
+            twoFactorEnabled?: boolean;
+            roles: components["schemas"]["RoleAssignment"][];
+        };
+        UserPage: {
+            items: components["schemas"]["User"][];
+            nextCursor?: string | null;
         };
         UserCreate: {
             /** Format: email */
             email: string;
             fullName: string;
-            specialty?: string;
-            roleCodes: string[];
-            branchIds?: string[];
+            /**
+             * Format: password
+             * @description Hərf və rəqəm daxil olmalıdır
+             */
+            password: string;
+            roles: components["schemas"]["RoleAssignment"][];
+        };
+        RoleGrant: {
+            /** @example invoice:refund */
+            permission: string;
+            /** @enum {string} */
+            scope: "own" | "branch" | "tenant";
+            /** @description Pul limiti (məs. refund); null = limitsiz */
+            maxAmount?: number | null;
+        };
+        Role: {
+            code: string;
+            name: string;
+            isSystem: boolean;
+            /** @description false: director, clinic_admin */
+            editable: boolean;
+            permissions: components["schemas"]["RoleGrant"][];
+        };
+        Roles: {
+            roles: components["schemas"]["Role"][];
+            permissions: {
+                code: string;
+                description?: string | null;
+            }[];
         };
     };
     responses: {
@@ -1792,6 +1968,7 @@ export interface components {
     parameters: {
         PatientId: string;
         AppointmentId: string;
+        UserId: string;
         InvoiceId: string;
         /** @description Opaque cursor */
         Cursor: string;
@@ -3339,7 +3516,231 @@ export interface operations {
             422: components["responses"]["Problem"];
         };
     };
-    getAdminUsers: {
+    getUsers: {
+        parameters: {
+            query?: {
+                /** @description locked = müvəqqəti bloklanmış (uğursuz girişlər) */
+                status?: "active" | "locked" | "disabled";
+                /** @description Opaque cursor */
+                cursor?: components["parameters"]["Cursor"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserPage"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    postUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreate"];
+            };
+        };
+        responses: {
+            /** @description Yaradıldı */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            /** @description user.email_exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            422: components["responses"]["Problem"];
+        };
+    };
+    getUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    patchUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    fullName: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    putUserRoles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    roles: components["schemas"]["RoleAssignment"][];
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    postUserDisable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+        };
+    };
+    postUserEnable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            404: components["responses"]["Problem"];
+        };
+    };
+    postUserResetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: components["parameters"]["UserId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: password */
+                    newPassword: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Parol dəyişdi */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
+        };
+    };
+    getRoles: {
         parameters: {
             query?: never;
             header?: never;
@@ -3354,31 +3755,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["UserSummary"][];
+                    "application/json": components["schemas"]["Roles"];
                 };
             };
+            403: components["responses"]["Problem"];
         };
     };
-    postAdminUsers: {
+    putRolePermissions: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                roleCode: string;
+            };
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UserCreate"];
+                "application/json": {
+                    permissions: components["schemas"]["RoleGrant"][];
+                };
             };
         };
         responses: {
             /** @description OK */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Role"];
+                };
             };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            422: components["responses"]["Problem"];
         };
     };
     getAdminAudit: {

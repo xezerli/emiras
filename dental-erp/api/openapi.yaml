@@ -637,20 +637,120 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SyncPushResponse' } } } }
         '422': { $ref: '#/components/responses/Problem' }
 
-  /admin/users:
+  /users:
     get:
-      operationId: getAdminUsers
+      operationId: getUsers
       tags: [Admin]
-      summary: İstifadəçilər
+      summary: İstifadəçilər (ada görə, cursor ilə). E-poçt maskalanır
       x-permission: user:manage
-      responses: { '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/UserSummary' } } } } } }
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, locked, disabled] }, description: 'locked = müvəqqəti bloklanmış (uğursuz girişlər)' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 100 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UserPage' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
     post:
-      operationId: postAdminUsers
+      operationId: postUsers
       tags: [Admin]
-      summary: İstifadəçi yarat (dəvət emaili göndərilir)
+      summary: İstifadəçi yarat. İlkin parolu idarəçi verir (dəvət e-poçtu göndərilmir); parol ≥10 simvol, hərf və rəqəm
       x-permission: user:manage
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UserCreate' } } } }
-      responses: { '201': { description: OK } }
+      responses:
+        '201': { description: Yaradıldı, headers: { Location: { schema: { type: string } } }, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { description: 'user.email_exists', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '422': { $ref: '#/components/responses/Problem' }
+  /users/{userId}:
+    parameters: [ { $ref: '#/components/parameters/UserId' } ]
+    get:
+      operationId: getUser
+      tags: [Admin]
+      summary: İstifadəçi
+      x-permission: user:manage
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+    patch:
+      operationId: patchUser
+      tags: [Admin]
+      summary: Göstərilən adı dəyiş
+      x-permission: user:manage
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [fullName], properties: { fullName: { type: string, maxLength: 200 } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /users/{userId}/roles:
+    parameters: [ { $ref: '#/components/parameters/UserId' } ]
+    put:
+      operationId: putUserRoles
+      tags: [Admin]
+      summary: Rolları əvəz et (1–10 rol). İstifadəçinin sessiyaları bağlanır; yeni icazələr növbəti girişdən sonra. Öz rolunu dəyişmək olmaz (403 user.self_change)
+      x-permission: user:manage
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [roles], properties: { roles: { type: array, items: { $ref: '#/components/schemas/RoleAssignment' } } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /users/{userId}/disable:
+    parameters: [ { $ref: '#/components/parameters/UserId' } ]
+    post:
+      operationId: postUserDisable
+      tags: [Admin]
+      summary: Hesabı söndür və bütün sessiyalarını ləğv et. Özünü söndürmək olmaz (403 user.self_change)
+      x-permission: user:manage
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /users/{userId}/enable:
+    parameters: [ { $ref: '#/components/parameters/UserId' } ]
+    post:
+      operationId: postUserEnable
+      tags: [Admin]
+      summary: Hesabı aç və müvəqqəti blokunu (uğursuz giriş sayğacı) təmizlə
+      x-permission: user:manage
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+  /users/{userId}/reset-password:
+    parameters: [ { $ref: '#/components/parameters/UserId' } ]
+    post:
+      operationId: postUserResetPassword
+      tags: [Admin]
+      summary: Parolu sıfırla (idarəçi yeni parol verir) və bütün sessiyaları ləğv et
+      x-permission: user:manage
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [newPassword], properties: { newPassword: { type: string, format: password, minLength: 10, maxLength: 128 } } } } } }
+      responses:
+        '204': { description: Parol dəyişdi }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+  /roles:
+    get:
+      operationId: getRoles
+      tags: [Admin]
+      summary: Rollar, hər rolun icazələri və təyin oluna bilən icazələrin siyahısı
+      x-permission: user:manage
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Roles' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /roles/{roleCode}/permissions:
+    parameters: [ { name: roleCode, in: path, required: true, schema: { type: string } } ]
+    put:
+      operationId: putRolePermissions
+      tags: [Admin]
+      summary: Rolun icazələrini əvəz et. director və clinic_admin dəyişmir (409 role.protected); user:manage verilə bilməz (422). Mövcud access token-lər ≤10 dəq. köhnə icazə ilə qalır
+      x-permission: user:manage
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [permissions], properties: { permissions: { type: array, items: { $ref: '#/components/schemas/RoleGrant' } } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Role' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
   /admin/audit:
     get:
       operationId: getAdminAudit
@@ -788,6 +888,7 @@ components:
   parameters:
     PatientId: { name: patientId, in: path, required: true, schema: { type: string, format: uuid } }
     AppointmentId: { name: appointmentId, in: path, required: true, schema: { type: string, format: uuid } }
+    UserId: { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
     InvoiceId: { name: invoiceId, in: path, required: true, schema: { type: string, format: uuid } }
     Cursor: { name: cursor, in: query, schema: { type: string }, description: Opaque cursor }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
@@ -1272,15 +1373,58 @@ components:
         applied: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entityId: { type: string, format: uuid }, rowVersion: { type: [integer, 'null'] } } } }
         conflicts: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, entity: { type: string }, entityId: { type: string, format: uuid }, serverVersion: { type: [integer, 'null'] }, serverData: { type: [object, 'null'], additionalProperties: true }, resolution: { type: string, enum: [needs_manual] } } } }
         rejected: { type: array, items: { type: object, properties: { clientChangeId: { type: string, format: uuid }, code: { type: string }, message: { type: [string, 'null'] } } } }
-    UserSummary:
+    RoleAssignment:
       type: object
-      properties: { id: { type: string, format: uuid }, fullName: { type: string }, specialty: { type: string }, roles: { type: array, items: { type: string } }, status: { type: string } }
+      required: [role]
+      properties:
+        role: { type: string, examples: [reception] }
+        branchId: { type: [string, 'null'], format: uuid, description: 'null = bütün filiallar' }
+    User:
+      type: object
+      required: [id, fullName, email, status, roles]
+      properties:
+        id: { type: string, format: uuid }
+        fullName: { type: string }
+        email: { type: string, description: 'Maskalanmış (a***@domen)' }
+        status: { type: string, enum: [active, locked, disabled] }
+        lastLoginAt: { type: [string, 'null'], format: date-time }
+        twoFactorEnabled: { type: boolean }
+        roles: { type: array, items: { $ref: '#/components/schemas/RoleAssignment' } }
+    UserPage:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/User' } }
+        nextCursor: { type: [string, 'null'] }
     UserCreate:
       type: object
-      required: [email, fullName, roleCodes]
+      required: [email, fullName, password, roles]
       properties:
-        email: { type: string, format: email }
-        fullName: { type: string }
-        specialty: { type: string }
-        roleCodes: { type: array, items: { type: string } }
-        branchIds: { type: array, items: { type: string, format: uuid } }
+        email: { type: string, format: email, maxLength: 254 }
+        fullName: { type: string, maxLength: 200 }
+        password: { type: string, format: password, minLength: 10, maxLength: 128, description: Hərf və rəqəm daxil olmalıdır }
+        roles: { type: array, minItems: 1, maxItems: 10, items: { $ref: '#/components/schemas/RoleAssignment' } }
+    RoleGrant:
+      type: object
+      required: [permission, scope]
+      properties:
+        permission: { type: string, examples: ['invoice:refund'] }
+        scope: { type: string, enum: [own, branch, tenant] }
+        maxAmount: { type: [number, 'null'], minimum: 0, description: 'Pul limiti (məs. refund); null = limitsiz' }
+    Role:
+      type: object
+      required: [code, name, isSystem, editable, permissions]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        isSystem: { type: boolean }
+        editable: { type: boolean, description: 'false: director, clinic_admin' }
+        permissions: { type: array, items: { $ref: '#/components/schemas/RoleGrant' } }
+    Roles:
+      type: object
+      required: [roles, permissions]
+      properties:
+        roles: { type: array, items: { $ref: '#/components/schemas/Role' } }
+        permissions:
+          type: array
+          items: { type: object, required: [code], properties: { code: { type: string }, description: { type: [string, 'null'] } } }

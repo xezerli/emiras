@@ -303,6 +303,51 @@ curl -X POST "$API/v1/invoices/$INVOICE/payments" \
 
 İcazə **iki oxlu**dur: *nə* (`invoice:read`, `patient:write` …) və *harada* (`own` < `branch` < `tenant`). Başqa filialın və ya başqa tenant-ın qeydi **404** qaytarır (varlığını bildirmir).
 
+### İstifadəçi və rolların idarəsi
+
+Hamısı `user:manage` icazəsi tələb edir (`director` və `clinic_admin`). Hesablar **dəvətlə yox, idarəçinin verdiyi ilkin parolla** yaradılır (e-poçt göndərişi hələ yoxdur): parol ≥10 simvol, hərf və rəqəm. Cavablarda e-poçt maskalıdır (`y***@demo.test`).
+
+```bash
+NEWMAIL="yeni-$(date +%s%N)@demo.test"
+curl -X POST "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"fullName\":\"Yeni Kassir\",\"password\":\"Ilkin-Parol-2026\",\"roles\":[{\"role\":\"cashier\"}]}"
+```
+
+`roles[].branchId` verilməsə rol **bütün filiallar** üçün keçərlidir. Eyni e-poçt ikinci dəfə → `409 user.email_exists`.
+
+```bash
+curl "$API/v1/users?limit=5" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+```
+
+Siyahı ada görə, `cursor` ilə səhifələnir; `status=active|locked|disabled` süzgəcdir (`locked` = uğursuz girişlərdən müvəqqəti bloklanmış).
+
+```bash
+curl -X PUT "$API/v1/users/$NEWID/roles" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"roles":[{"role":"reception"}]}'
+curl -X POST "$API/v1/users/$NEWID/reset-password" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"newPassword":"Yeni-Parol-2026"}'
+curl -X POST "$API/v1/users/$NEWID/disable" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+```
+
+Rolları dəyişmək, parolu sıfırlamaq və söndürmək istifadəçinin **bütün sessiyalarını bağlayır** (refresh token-lər ləğv olunur); artıq verilmiş access token ən çox 10 dəqiqə köhnə icazə ilə işləyə bilər. `POST /users/{id}/enable` hesabı açır və müvəqqəti bloku təmizləyir. **Öz hesabınızı söndürmək və öz rollarınızı dəyişmək olmaz** (`403 user.self_change`), beləcə heç kim özünü sistemdən kilidləyə bilməz.
+
+```bash
+curl -X POST "$API/v1/auth/login" -H "X-Tenant: $TENANT" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"password\":\"Yeni-Parol-2026\"}"
+```
+
+Söndürülmüş hesab girişdə `403 auth.account_disabled` alır.
+
+```bash
+curl "$API/v1/roles" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+curl -X PUT "$API/v1/roles/hygienist/permissions" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"permissions":[{"permission":"patient:read","scope":"branch"},{"permission":"appointment:read","scope":"branch"}]}'
+```
+
+`GET /roles` hər rolun icazələrini (`scope`: `own`/`branch`/`tenant`, pul icazələrində `maxAmount`) və təyin oluna bilən icazələrin siyahısını qaytarır. `PUT` rolun icazələrini **tam əvəz edir**. Qaydalar: `director` və `clinic_admin` dəyişmir (`409 role.protected`), `user:manage` başqa rola verilə bilməz (`422 role.permission_not_assignable`), naməlum icazə `422 role.unknown_permission`.
+
+```bash
+curl -X PUT "$API/v1/roles/clinic_admin/permissions" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"permissions":[]}'
+curl "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $DOCTOR_TOKEN"
+```
+
+İkinci sorğu `403 permission.denied` qaytarır: həkimin `user:manage` icazəsi yoxdur.
+
 ## 7. Xəta kodları
 
 Xəta cavabı həmişə `application/problem+json`-dur; `code` sabitdir və klientin məntiqi buna əsaslanmalıdır (`title` dəyişə bilər). Əsas kodlar:
@@ -337,7 +382,7 @@ Bunlar bilinən uyğunsuzluqlardır ([STATUS](../STATUS.md)-da izlənir); real d
 | Xəta cavabında `traceId` və `errors` (sahə üzrə) | Sxemdə var, **hələ doldurulmur** |
 | `RateLimit-*` başlıqları, istifadəçi başına limit | **IP başına** sabit pəncərə (`/v1/auth/*`: 30/dəq, qalanı 600/dəq, konfiqurasiya olunur), cavab `429` + `Retry-After: 60`, `RateLimit-*` başlıqları yoxdur |
 | `/auth/me`: `specialty`, `locale` | Qaytarılmır (sxemdən çıxarılıb) |
-| `/admin/users`, `/auth/2fa/verify`, `/auth/sessions`, sənəd yükləmə, razılıq imzası, `treatment-plans/{id}/accept` və s. | **Hələ həyata keçirilməyib** (sxemdə var) |
+| `/auth/2fa/verify`, `/auth/sessions`, sənəd yükləmə, razılıq imzası, `treatment-plans/{id}/accept` və s. | **Hələ həyata keçirilməyib** (sxemdə var) |
 
 ## 10. Nümunələri özünüz işlədin
 

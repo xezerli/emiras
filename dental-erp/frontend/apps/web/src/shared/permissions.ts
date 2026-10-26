@@ -21,6 +21,8 @@ export const NAV: readonly NavItem[] = [
   { href: "/patients", label: "Pasiyentlər", permission: "patient:read" },
   { href: "/calendar", label: "Təqvim", permission: "appointment:read" },
   { href: "/billing", label: "Maliyyə", permission: "invoice:read" },
+  { href: "/users", label: "İstifadəçilər", permission: "user:manage" },
+  { href: "/roles", label: "Rollar", permission: "user:manage" },
 ];
 
 export function visibleNav(permissions: readonly Permission[] | undefined): NavItem[] {

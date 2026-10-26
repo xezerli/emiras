@@ -9,7 +9,7 @@
 | [README](../README.md), [docs/README](README.md) | Hamı | `check-docs.py` (keçidlər) |
 | [STATUS](STATUS.md) | Qərar verənlər | Hər iddia testə/əmrə bağlıdır; "yoxlanmayıb" bölməsi var |
 | [user-guide](guides/user-guide.md) | Klinika işçiləri | 11 skrinşot **real UI-dan** (təmiz DB, uydurma məlumat); rol cədvəli DB-dən götürülüb |
-| [api-guide](guides/api-guide.md) | İnteqratorlar | Hər `curl` bloku `tests/docs/api-guide-examples.sh`-dən götürülüb; skript canlı stack-ə qarşı **58 yoxlama** keçir; CI-nin e2e işində də işləyir |
+| [api-guide](guides/api-guide.md) | İnteqratorlar | Hər `curl` bloku `tests/docs/api-guide-examples.sh`-dən götürülüb; skript canlı stack-ə qarşı **76 yoxlama** keçir; CI-nin e2e işində də işləyir |
 | [developer-guide](guides/developer-guide.md) | Developer-lər | Quraşdırma və test əmrləri işlədilib; `next dev` axını tam yoxlanmayıb (yazılıb) |
 | [security-and-privacy](guides/security-and-privacy.md) | Təhlükəsizlik/hüquq | İddialar koda qarşı yoxlanıb (Argon2id parametrləri, kilid siyasəti, başlıqlar, CSP-nin olmaması, OTel atributları); boşluqlar §9 |
 | [adr/](adr/README.md) | Developer-lər | 9 ADR; **real koda görə**: MediatR, MassTransit və event sourcing planlaşdırılmışdı, tətbiq olunmayıb |

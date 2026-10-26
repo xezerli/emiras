@@ -18,7 +18,7 @@ Bu mərhələ **Faza 1** kontraktlarını əhatə edir: Auth, Patient, Schedulin
 | Billing | `/services`, `/invoices` (+`/issue`, `/pdf`, `/payments`), `/payments/{id}/refund`, `/cash-shifts/open|close` |
 | Dashboard | `GET /dashboard/summary` |
 | Sync | `GET /sync/pull`, `POST /sync/push` |
-| Admin | `/admin/users`, `/admin/audit` |
+| Admin | `/users`, `/roles` (Mərhələ 10 sonrası; əvvəl `/admin/users` planlanmışdı), `/admin/audit` |
 
 ## 2. Ümumi konvensiyalar
 
