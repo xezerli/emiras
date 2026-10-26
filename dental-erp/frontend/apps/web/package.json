@@ -1,0 +1,30 @@
+{
+  "name": "@dentacore/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:build": "API_ORIGIN=${E2E_API_ORIGIN:-http://127.0.0.1:5100} NEXT_PUBLIC_DEV_TENANT=${E2E_TENANT:-demo} next build",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@dentacore/api-client": "workspace:*",
+    "@dentacore/ui": "workspace:*",
+    "@microsoft/signalr": "^10.0.0",
+    "@tanstack/react-query": "^5.104.2",
+    "next": "^16.4.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.64.0",
+    "eslint-config-next": "^16.4.3"
+  }
+}

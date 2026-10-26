@@ -1,0 +1,31 @@
+# OpenTelemetry Collector: tətbiqlər OTLP ilə ITƏLƏYİR (heç bir host-da /metrics scrape endpoint-i yoxdur), Prometheus bu Collector-u oxuyur.
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4318 }
+
+processors:
+  memory_limiter: { check_interval: 1s, limit_percentage: 80, spike_limit_percentage: 20 }
+  batch: {}
+  # Telemetriyada PHI olmamalıdır: yolun sorğu sətri və tam URL atributları silinir (defense-in-depth; tətbiq özü də yazmır)
+  attributes/scrub:
+    actions:
+      - { key: url.query, action: delete }
+      - { key: url.full, action: delete }
+      - { key: http.url, action: delete }
+      - { key: http.target, action: delete }
+      - { key: db.statement, action: delete }
+      - { key: db.query.text, action: delete }
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion: { enabled: true }     # service.name → service_name etiketi
+  # İzlər: Tempo/Jaeger OTLP endpoint-i verilənə qədər yalnız sayğac səviyyəsində (istehsalda `otlp` ixracçısı ilə əvəz edin)
+  debug: { verbosity: basic }
+
+service:
+  pipelines:
+    metrics: { receivers: [otlp], processors: [memory_limiter, attributes/scrub, batch], exporters: [prometheus] }
+    traces: { receivers: [otlp], processors: [memory_limiter, attributes/scrub, batch], exporters: [debug] }

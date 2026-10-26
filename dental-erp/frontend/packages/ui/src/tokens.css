@@ -1,0 +1,45 @@
+/* DentaCore Design Tokens: Material Design 3 rolları + Glassmorphism.
+   Hər rəng token-dir; komponentlər yalnız token işlədir. Dark rejim [data-theme="dark"] və ya OS seçimi. */
+:root {
+  --md-primary: #006a6a;        --md-on-primary: #ffffff;
+  --md-primary-container: #9cf1f0; --md-on-primary-container: #002020;
+  --md-secondary: #4a6363;      --md-secondary-container: #cce8e7;
+  --md-tertiary: #4b607c;
+  --md-error: #ba1a1a;          --md-error-container: #ffdad6;
+  --md-warning: #8a5100;        --md-warning-container: #ffddb8;
+  --md-success: #1b6b3a;        --md-success-container: #a8f2bf;
+  --md-surface: #f4fafa;        --md-on-surface: #161d1d;
+  --md-on-surface-variant: #3f4948;
+  --md-outline: #6f7979;        --md-outline-variant: #bec8c8;
+  --bg-grad: radial-gradient(1200px 600px at 10% -10%, #bff0ef 0%, transparent 60%),
+             radial-gradient(900px 500px at 100% 0%, #d6e3ff 0%, transparent 55%), var(--md-surface);
+  --glass: rgba(255,255,255,.62);  --glass-border: rgba(255,255,255,.75);
+  --glass-shadow: 0 8px 32px rgba(0,60,60,.10);
+  --blur: saturate(160%) blur(18px);
+  --radius-s: 10px; --radius-m: 16px; --radius-l: 24px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --font: Inter, "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --fs-label: 12px; --fs-body: 14px; --fs-title: 18px; --fs-headline: 24px; --fs-display: 32px;
+  --motion-fast: 120ms; --motion-med: 240ms; --ease: cubic-bezier(.2,0,0,1);
+  /* Diş/klinik vəziyyət rəngləri (rəng + ikon/forma ilə, yalnız rənglə fərqləndirilmir) */
+  --tooth-healthy: #e9f3f2; --tooth-caries: #ba1a1a; --tooth-filling: #4b607c; --tooth-crown: #b8860b;
+  --tooth-implant: #6b4fa3; --tooth-rootcanal: #c2410c; --tooth-missing: #9aa5a5; --tooth-planned: #006a6a;
+}
+:root[data-theme="dark"] {
+  --md-primary: #80d5d4;        --md-on-primary: #003737;
+  --md-primary-container: #004f4f; --md-on-primary-container: #9cf1f0;
+  --md-secondary: #b0cccb;      --md-secondary-container: #324b4b;
+  --md-tertiary: #b3c8e8;
+  --md-error: #ffb4ab;          --md-error-container: #93000a;
+  --md-warning: #ffb869;        --md-warning-container: #653900;
+  --md-success: #8cd5a3;        --md-success-container: #00522a;
+  --md-surface: #0e1415;        --md-on-surface: #dde4e3;
+  --md-on-surface-variant: #bec8c8;
+  --md-outline: #899392;        --md-outline-variant: #3f4948;
+  --bg-grad: radial-gradient(1200px 600px at 10% -10%, #0b3a3b 0%, transparent 60%),
+             radial-gradient(900px 500px at 100% 0%, #162a47 0%, transparent 55%), var(--md-surface);
+  --glass: rgba(30,42,43,.55);  --glass-border: rgba(255,255,255,.10);
+  --glass-shadow: 0 8px 32px rgba(0,0,0,.45);
+  --tooth-healthy: #2a3a3a; --tooth-missing: #5b6666;
+}
+@media (prefers-reduced-motion: reduce) { :root { --motion-fast: 0ms; --motion-med: 0ms; } }

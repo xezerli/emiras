@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /dental-erp/backend
+    schedule: { interval: weekly }
+    groups: { opentelemetry: { patterns: ["OpenTelemetry*"] }, microsoft: { patterns: ["Microsoft.*"] } }
+  - package-ecosystem: npm
+    directory: /dental-erp/frontend
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /dental-erp/infra/docker
+    schedule: { interval: weekly }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

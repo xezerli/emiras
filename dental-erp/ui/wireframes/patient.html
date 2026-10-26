@@ -1,0 +1,27 @@
+<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pasiyent kartı · DentaCore</title><link rel="stylesheet" href="wireframes.css">
+<style>.avatar{width:72px;height:72px;border-radius:50%;background:var(--md-primary-container);display:grid;place-items:center;font-size:28px;font-weight:700;color:var(--md-on-primary-container)}
+.tl{border-left:2px solid var(--md-outline-variant);margin-left:8px}.tl>div{padding:0 0 16px 16px;position:relative}.tl>div:before{content:"";position:absolute;left:-6px;top:4px;width:10px;height:10px;border-radius:50%;background:var(--md-primary)}</style></head><body>
+<main id="app">
+  <div class="alert-banner" role="alert">⚠ Allergiya: Penisillin (ağır) · Xəstəlik: Hipertoniya · Anesteziya zamanı diqqət</div>
+  <div class="card" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+    <div class="avatar" aria-hidden="true">AQ</div>
+    <div><h1 style="margin:0">Aysel Qasımova</h1><div class="sub">Kart № 004281 · 34 yaş · Q · +994 50 ••• •• 71 <button class="icon-btn" aria-label="Nömrəni göstər (audit-ə yazılır)">👁</button></div>
+      <div style="margin-top:6px"><span class="chip ok">Aktiv</span> <span class="chip">ADB Sığorta 80%</span> <span class="chip warn">Borc 120 ₼</span> <span class="chip">No-show: 0</span></div></div>
+    <span class="spacer"></span>
+    <button class="btn">＋ Qəbul</button><button class="btn tonal">Vizitə başla</button><button class="btn outline">Faktura</button></div>
+  <nav class="tabs" style="margin-top:16px" aria-label="Pasiyent bölmələri">
+    <a class="on" href="#">İcmal</a><a href="odontogram.html">Odontoqram</a><a href="#">Müalicə planı</a><a href="#">Anamnez</a><a href="#">Görüntülər</a><a href="#">Sənədlər</a><a href="billing.html">Maliyyə</a><a href="#">Ailə</a></nav>
+  <div class="grid g2">
+    <div class="card"><h2>Tarixçə</h2><div class="tl">
+      <div><b>7 okt · Vizit — Dr. Əliyeva</b><br><span class="sub">Plomb 36 (kompozit) · 180 ₼ · ödənilib</span></div>
+      <div><b>21 sen · Rentgen</b><br><span class="sub">Panoram · <a href="#">bax</a></span></div>
+      <div><b>3 sen · Peşəkar təmizlik — Gigiyenist Ə.</b><br><span class="sub">Gingivit əlamətləri, perio chart yeniləndi</span></div>
+      <div><b>12 iyl · Razılıq imzalandı</b><br><span class="sub">Endodontik müalicə · e-imza ✔</span></div></div></div>
+    <div style="display:grid;gap:16px">
+      <div class="card"><h2>Tibbi profil</h2><p class="sub">Allergiyalar</p><span class="chip err">Penisillin · ağır</span>
+        <p class="sub">Dərmanlar</p><span class="chip">Amlodipin 5 mq</span>
+        <p class="sub">Şikayət (son)</p><p>«Soyuğa həssaslıq, yuxarı sağ»</p><div class="note">AI qeydi: səs yazısından avtomatik doldurulub, həkim təsdiqini gözləyir.</div></div>
+      <div class="card"><h2>Aktiv plan</h2><div style="background:var(--md-outline-variant);border-radius:99px;height:10px"><div style="width:40%;height:10px;border-radius:99px;background:var(--md-primary)"></div></div>
+        <p class="sub">2 / 5 mərhələ · qalıq 640 ₼</p></div></div></div>
+</main><script src="shared.js"></script><script>mountShell('Pasiyentlər');</script></body></html>

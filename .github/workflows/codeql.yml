@@ -1,0 +1,33 @@
+name: codeql
+
+on:
+  pull_request:
+    paths: ["dental-erp/**"]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [csharp, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        if: matrix.language == 'csharp'
+        with: { global-json-file: dental-erp/backend/global.json }
+      - uses: github/codeql-action/init@v3
+        with: { languages: "${{ matrix.language }}", queries: security-extended }
+      - name: Build (C#)
+        if: matrix.language == 'csharp'
+        run: dotnet build dental-erp/backend/DentaCore.sln -c Release --nologo
+      - uses: github/codeql-action/analyze@v3
+        with: { category: "/language:${{ matrix.language }}" }

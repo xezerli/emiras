@@ -1,0 +1,7 @@
+apiVersion: v2
+name: dentacore
+description: "DentaCore (Dental Clinic ERP): Identity, ClinicCore, Billing, Notify, Workers, Gateway və Next.js web"
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.28.0-0"

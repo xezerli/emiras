@@ -1,0 +1,40 @@
+<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Odontoqram · DentaCore</title><link rel="stylesheet" href="wireframes.css">
+<style>.tooth{cursor:pointer}.tooth rect{stroke:var(--md-outline);stroke-width:1.5;transition:fill var(--motion-med) var(--ease)}
+.tooth:hover rect,.tooth:focus rect{stroke:var(--md-primary);stroke-width:3}.tooth.sel rect{stroke:var(--md-primary);stroke-width:4}
+.tooth text{font-size:11px;fill:var(--md-on-surface);text-anchor:middle;pointer-events:none}.cond{display:flex;flex-wrap:wrap;gap:6px}
+.cond button{padding:6px 12px}.legend span{display:inline-flex;gap:6px;align-items:center;margin-right:12px;font-size:12px}.legend i{width:14px;height:14px;border-radius:4px;display:inline-block;border:1px solid var(--md-outline)}</style></head><body>
+<main id="app">
+  <h1>Odontoqram <span class="sub">Aysel Qasımova · FDI nömrələmə</span></h1>
+  <div class="grid" style="grid-template-columns:1fr 320px">
+    <div class="card"><svg id="chart" viewBox="0 0 840 300" width="100%" role="group" aria-label="Diş sxemi"></svg>
+      <div class="legend" id="legend" style="margin-top:8px"></div>
+      <div class="note">Klik: diş seç · 1–9: sürətli vəziyyət · Ctrl+Z: geri al · Tab/Ox: dişlər arası naviqasiya. 60 FPS üçün SVG→Canvas keçidi dişlərin sayı artanda (süd + daimi qarışıq).</div></div>
+    <div style="display:grid;gap:16px;align-content:start">
+      <div class="card"><h2 id="selTitle">Diş seçilməyib</h2><div class="cond" id="cond" aria-label="Vəziyyət"></div>
+        <div class="field" style="margin-top:12px"><label>Səth</label><select id="surface"><option value="">Bütün diş</option><option>M</option><option>D</option><option>O</option><option>B</option><option>L</option></select></div>
+        <button class="btn" id="save">Yadda saxla</button> <button class="btn outline" id="undo">Geri al</button></div>
+      <div class="card"><h2>Bu vizitdə qeydlər</h2><ol id="log" style="padding-left:18px;margin:0" class="sub"><li>Boş</li></ol></div>
+      <div class="card"><h2>Müalicə planına əlavə et</h2><p class="sub">Seçilmiş diş vəziyyətinə uyğun prosedur təklif olunur (məs. kariyes → plomb).</p><button class="btn tonal">＋ Plana əlavə et</button></div>
+    </div></div>
+</main><script src="shared.js"></script><script>
+mountShell('Odontoqram');
+const C={healthy:['Sağlam','--tooth-healthy'],caries:['Kariyes','--tooth-caries'],filling:['Plomb','--tooth-filling'],crown:['Tac','--tooth-crown'],implant:['İmplant','--tooth-implant'],root_canal:['Kanal','--tooth-rootcanal'],missing:['Çıxarılıb','--tooth-missing']};
+const SYM={healthy:'',caries:'●',filling:'■',crown:'♛',implant:'⚙',root_canal:'┃',missing:'✕'}; // rəngdən başqa simvol (a11y)
+const upper=[18,17,16,15,14,13,12,11,21,22,23,24,25,26,27,28], lower=[48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38];
+const state={}, hist=[], logEl=document.getElementById('log'); let sel=null, cond='caries';
+const svg=document.getElementById('chart'); const W=46,G=3;
+function draw(){svg.innerHTML='';[[upper,40],[lower,170]].forEach(([row,y])=>row.forEach((n,i)=>{
+ const x=20+i*(W+G)+(i>=8?14:0),c=state[n]||'healthy',g=document.createElementNS('http://www.w3.org/2000/svg','g');
+ g.setAttribute('class','tooth'+(sel===n?' sel':''));g.setAttribute('tabindex','0');g.setAttribute('role','button');g.setAttribute('aria-label',`Diş ${n}: ${C[c][0]}`);
+ g.innerHTML=`<rect x="${x}" y="${y}" width="${W}" height="${W+22}" rx="12" fill="var(${C[c][1]})"/><text x="${x+W/2}" y="${y+W/2+8}" style="font-size:20px">${SYM[c]}</text><text x="${x+W/2}" y="${y+W+16}">${n}</text>`;
+ g.onclick=()=>pick(n);g.onkeydown=e=>{if(e.key==='Enter'||e.key===' ')pick(n)};svg.appendChild(g)}));}
+function pick(n){sel=n;document.getElementById('selTitle').textContent=`Diş ${n}`;draw()}
+document.getElementById('cond').innerHTML=Object.entries(C).map(([k,[l]])=>`<button class="btn ${k===cond?'':'tonal'}" data-k="${k}">${SYM[k]} ${l}</button>`).join('');
+document.getElementById('cond').onclick=e=>{const k=e.target.closest('button')?.dataset.k;if(!k)return;cond=k;[...document.querySelectorAll('#cond button')].forEach(b=>b.classList.toggle('tonal',b.dataset.k!==k))};
+document.getElementById('save').onclick=()=>{if(!sel)return;hist.push([sel,state[sel]]);state[sel]=cond;if(logEl.firstChild.textContent==='Boş')logEl.innerHTML='';
+ const li=document.createElement('li');li.textContent=`Diş ${sel}: ${C[cond][0]}${document.getElementById('surface').value?' ('+document.getElementById('surface').value+')':''}`;logEl.appendChild(li);draw()};
+document.getElementById('undo').onclick=()=>{const h=hist.pop();if(!h)return;h[1]?state[h[0]]=h[1]:delete state[h[0]];logEl.lastChild&&logEl.removeChild(logEl.lastChild);draw()};
+document.getElementById('legend').innerHTML=Object.entries(C).map(([k,[l,v]])=>`<span><i style="background:var(${v})"></i>${SYM[k]} ${l}</span>`).join('');
+state[36]='filling';state[46]='root_canal';state[24]='implant';state[18]='missing';state[16]='crown';draw();
+</script></body></html>
