@@ -792,7 +792,7 @@ components:
     Cursor: { name: cursor, in: query, schema: { type: string }, description: Opaque cursor }
     Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
     IfMatch: { name: If-Match, in: header, required: true, schema: { type: string }, description: Resursun rowVersion dəyəri (ETag) }
-    IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 64 }, description: Təkrar göndərmə eyni nəticəni qaytarır (24 saat) }
+    IdempotencyKey: { name: Idempotency-Key, in: header, schema: { type: string, maxLength: 64 }, description: "Yalnız ödəniş və refund-da tətbiq olunur (orada məcburidir; açar verilənlər bazasında əbədi unikaldır). Digər əməliyyatlarda başlıq nəzərə alınmır." }
   responses:
     Problem:
       description: Xəta (RFC 9457)

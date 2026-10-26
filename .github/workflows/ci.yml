@@ -32,6 +32,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm, cache-dependency-path: dental-erp/frontend/pnpm-lock.yaml }
       - run: npx --yes @redocly/cli@1 lint api/openapi.yaml --config api/redocly.yaml
+      - name: Sənəd istinadları (keçid, başlıq, şəkil, skript, ADR indeksi)
+        run: python3 tests/docs/check-docs.py
       - name: Generasiya olunmuş TypeScript tipləri OpenAPI ilə eynidir
         working-directory: dental-erp/frontend
         run: |
@@ -165,6 +167,9 @@ jobs:
       - name: E2E
         working-directory: dental-erp/frontend
         run: pnpm --filter @dentacore/web e2e
+      - name: API bələdçisinin nümunələri canlı stack-ə qarşı
+        working-directory: dental-erp
+        run: tests/docs/api-guide-examples.sh
       - name: Servis log-ları (uğursuzluqda)
         if: failure()
         run: tail -n 80 /tmp/dentacore-stack/*.log

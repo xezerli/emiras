@@ -31,7 +31,7 @@ Bu mərhələ **Faza 1** kontraktlarını əhatə edir: Auth, Patient, Schedulin
 | Xətalar | RFC 9457 `application/problem+json` + `code` + `traceId`. Doğrulama xətaları 422, `errors` sahəsi ilə |
 | Pagination | Cursor (`cursor`, `limit` ≤ 100), cavab `nextCursor` |
 | Concurrency | `PATCH` üçün `If-Match: <rowVersion>`, uyğunsuzluqda **412**. Klient yenidən oxuyub merge edir |
-| İdempotentlik | `Idempotency-Key` (yaratma əməliyyatlarında, ödəniş/refund-da **məcburi**). Eyni açar 24 saat eyni cavabı qaytarır |
+| İdempotentlik | `Idempotency-Key` **yalnız ödəniş və refund-da** işləyir (orada məcburidir; açar DB-də əbədi unikaldır). Digər yaratma əməliyyatlarında başlıq nəzərə alınmır (Mərhələ 10 düzəlişi; bax [api-guide §9](guides/api-guide.md))
 | Patch | `application/merge-patch+json` (RFC 7396) |
 | Vaxt | ISO 8601 UTC, tarix `YYYY-MM-DD` |
 | Pul | `number` (2 onluq) + `currency`. Serverdə `decimal`, yuvarlaqlaşdırma bank qaydası ilə |

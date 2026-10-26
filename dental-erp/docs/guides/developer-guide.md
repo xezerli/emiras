@@ -34,7 +34,7 @@ infra/dev/run-stack.sh stop
 # 3) veb
 cd frontend && pnpm install
 pnpm --filter @dentacore/web e2e:build            # API_ORIGIN və NEXT_PUBLIC_DEV_TENANT build zamanı "bişir"
-pnpm --filter @dentacore/web exec next start -p 3100
+API_ORIGIN=http://127.0.0.1:5100 DEV_TENANT=demo pnpm --filter @dentacore/web exec next start -p 3100
 ```
 
 Seed istifadəçiləri `admin@demo.test`, `reception@demo.test`, `doctor@demo.test` və s.; parol `seed.txt` faylındadır (`SEED_PASSWORD` ilə təyin edilə bilər). Açarlar (JWT RSA, PII) `STACK_DIR`-də yaranır və repoya düşmür.

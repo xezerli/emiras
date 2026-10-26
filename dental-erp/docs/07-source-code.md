@@ -16,6 +16,7 @@
 | 7c | Elasticsearch indexer + axtarış (REAL Elasticsearch 8.11 ilə sınaqdan keçib) | ✅ Tamamlandı |
 | 8a | Frontend əsası: tipli API klienti, Design System, BFF auth, shell, dashboard, realtime | ✅ Tamamlandı |
 | 8b | Pasiyent / təqvim / maliyyə ekranları, DevSeed, `run-stack.sh`, Playwright e2e (real stack) | ✅ Tamamlandı |
+| 10 | Sənədləşdirmə zamanı tapılan UI düzəlişləri (qrafik etiketləri, allergiya/ödəniş etiketləri, keçid rəngləri, cookie ömrü) | ✅ Tamamlandı, bax [10-documentation](10-documentation.md) |
 
 ---
 
