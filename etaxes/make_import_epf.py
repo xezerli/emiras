@@ -50,6 +50,16 @@ C = obj['data']
 C = C[len(BOM):] if C.startswith(BOM) else C
 PREFIX = 'Обработки.ВзаимодействиеСПорталомETaxes.'.encode()
 C = C.replace(PREFIX, b'').replace('ПолучитьТелоКакСтроку()'.encode(), 'ПолучитьТелоКакСтроку("UTF-8")'.encode())
+# Запрос содержимого счёта-фактуры - GET; в компоненте по умолчанию POST, поэтому метод указываем явно
+_u = C.decode('utf-8')
+_a = '\tПараметрыЗапроса.АдресРесурса = СтроковыеФункцииКлиентСервер.ПодставитьПараметрыВСтроку("/api/po/invoice/public/v2/invoice/%1?sourceSystem=%2"'
+assert _u.count(_a) == 1
+_u = _u.replace(_a, '\tПараметрыЗапроса.HTTPМетод = "GET";\r\n' + _a)
+# ошибку получения содержимого показываем пользователю (в оригинале Возврат стоял раньше сообщения)
+_e = re.search(r'\t\tВозврат Ложь;\r?\n\t\tОбщегоНазначения\.СообщитьОбОшибке\(НСтр\("ru = \'Ошибка при получении содержимого счета-фактуры\.\'; az = \'Hesab-faktura alan zamanı səhv\.\'"\)\);', _u)
+assert _e, 'err block'
+_u = _u.replace(_e.group(0), '\t\tСообщитьОтветПортала(HTTPОтвет, НСтр("ru = \'Ошибка при получении содержимого счета-фактуры.\'; az = \'Hesab-faktura alan zamanı səhv.\'"));\r\n\t\tВозврат Ложь;')
+C = _u.encode('utf-8')
 obj['data'] = (BOM + perem + b'\r\n' + C.rstrip(b'\r\n') + b'\r\n\r\n'
                + '// ===== Компонент ETaxes (авторизация и HTTP-запросы к new.e-taxes.gov.az) =====\r\n'.encode()
                + D_body.rstrip(b'\r\n') + b'\r\n' + rd('ИмпортСчетовФактур_ASAN_добавка.bsl'))
