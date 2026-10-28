@@ -43,8 +43,8 @@
 			+ """kinds"":" + МассивВJSON(МассивВидовЭСФ()) + ","
 			+ """statuses"":" + МассивВJSON(МассивСтатусовЭСФ()) + ","
 			+ """types"":[""current"",""corrected""],"
-			+ """maxCount"":" + Формат(РазмерСтраницы, "ЧГ=0") + ","
-			+ """offset"":" + Формат(Смещение, "ЧГ=0") + ","
+			+ """maxCount"":" + XMLСтрока(РазмерСтраницы) + ","
+			+ """offset"":" + XMLСтрока(Смещение) + ","
 			+ """productCode"":null,""productName"":null,""receiverName"":null,""receiverTin"":null,"
 			+ """senderName"":null,""senderTin"":null,""serialNumber"":null}";
 
@@ -58,6 +58,7 @@
 
 		Если HTTPОтвет = Неопределено Или HTTPОтвет.КодСостояния <> 200 Тогда
 			СообщитьОтветПортала(HTTPОтвет, НСтр("ru = 'Ошибка получения входящих ЭСФ.'; az = 'Daxil olan e-qaimələrin alınmasında xəta.'"));
+			Сообщить(НСтр("ru = 'Отправленное тело запроса: '; az = 'Göndərilən sorğu gövdəsi: '") + ТелоЗапроса);
 			Прервать;
 		КонецЕсли;
 
