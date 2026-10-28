@@ -162,17 +162,16 @@
 
 КонецПроцедуры
 
-// Значения перечислений скопированы из запроса портала (в DevTools они были обрезаны многоточием).
-// Если портал использует и другие значения — допишите их в строку через запятую.
+// Полные списки значений взяты из внешней обработки импорта счетов-фактур.
 Функция МассивВидовЭСФ()
 
-	Возврат МассивИзСтрок("defaultInvoice,agent,resale,recycling,taxCodex163,taxCodex177_5,returnInvoice");
+	Возврат МассивИзСтрок("defaultInvoice,agent,resale,recycling,taxCodex163,taxCodex177_5,returnInvoice,returnByAgent,returnRecycled,exportNoteInvoice,exciseGoodsTransfer");
 
 КонецФункции
 
 Функция МассивСтатусовЭСФ()
 
-	Возврат МассивИзСтрок("approved,onApproval,updateApproval,updateRequested,cancelRequested,approvedBySystem");
+	Возврат МассивИзСтрок("approved,onApproval,updateApproval,updateRequested,cancelRequested,approvedBySystem,onApprovalEdited,canceled,cancelationRefused,correctionRefused");
 
 КонецФункции
 
