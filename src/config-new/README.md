@@ -22,3 +22,13 @@ Hədiyyə və endirim kartları, aksiyalar («Компании»), sürətli se�
 
 ## Diqqət
 Form.xml 1C olmadan yazılıb və platformada yoxlanmayıb. Yükləmə xəta versə, xəta mətnini göndərin.
+
+## Ayrıca emal (.epf) kimi yoxlamaq — konfiqurasiyaya yükləmədən
+Hazır xarici emal mənbəyi: `src/config-new/external/`. Windows-da (öz test bazanızın yolu ilə):
+
+```
+"C:\Program Files\1cv8\<versiya>\bin\1cv8.exe" DESIGNER /F "C:\Baza\Test" /LoadExternalDataProcessorOrExternalReportFromFiles "C:\...\external\РМК_Yeni.xml" "C:\...\РМК_Yeni.epf"
+```
+Sonra 1C-də Fayl → Открыть ilə `РМК_Yeni.epf` açın. Qeydlər:
+- Baza əsl konfiqurasiyanın (Справочник.Номенклатура və s.) test nüsxəsi olmalıdır.
+- Konfiqurasiyada `UseManagedFormInOrdinaryApplication = true` yenə lazımdır (tək bayraq, obyekt yükləmək lazım deyil).

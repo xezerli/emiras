@@ -340,3 +340,24 @@ open(os.path.join(fdir, 'Форма', 'Ext', 'Form.xml'), 'w', encoding='utf-8-s
 mod = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rmk_yeni_module.bsl'), encoding='utf-8').read()
 open(os.path.join(fdir, 'Форма', 'Ext', 'Form', 'Module.bsl'), 'w', encoding='utf-8-sig').write(mod)
 print('OK ->', os.path.normpath(ROOT), '| ids:', _id[0])
+
+# ---------- 5. Версия внешней обработки (.epf) ----------
+import shutil
+EXT = os.path.join(ROOT, '..', 'external')
+if os.path.exists(EXT): shutil.rmtree(EXT)
+os.makedirs(EXT)
+shutil.copytree(os.path.join(ROOT, NAME), os.path.join(EXT, NAME))
+e = open(os.path.join(ROOT, NAME + '.xml'), encoding='utf-8-sig').read()
+e = e.replace('<DataProcessor uuid=', '<ExternalDataProcessor uuid=', 1).replace('</DataProcessor>', '</ExternalDataProcessor>')
+# убрать менеджер, переименовать генерируемые типы
+e = re.sub(r'\s*<xr:GeneratedType name="DataProcessorManager\.[^"]*" category="Manager">.*?</xr:GeneratedType>', '', e, flags=re.S)
+e = e.replace('DataProcessorObject.', 'ExternalDataProcessorObject.').replace('DataProcessorTabularSection', 'ExternalDataProcessorTabularSection')
+e = e.replace('<DefaultForm>DataProcessor.', '<DefaultForm>ExternalDataProcessor.')
+e = e.replace('<UseStandardCommands>false</UseStandardCommands>', '')
+# ContainedObject внешней обработки
+e = e.replace('<InternalInfo>', '<InternalInfo>\n\t\t\t<xr:ContainedObject>\n\t\t\t\t<xr:ClassId>c3831ec8-d8d5-4f93-8a22-f9bfae07327f</xr:ClassId>\n\t\t\t\t<xr:ObjectId>%s</xr:ObjectId>\n\t\t\t</xr:ContainedObject>' % uuid.uuid4(), 1)
+open(os.path.join(EXT, NAME + '.xml'), 'w', encoding='utf-8-sig').write(e)
+fx = os.path.join(EXT, NAME, 'Forms', 'Форма', 'Ext', 'Form.xml')
+t = open(fx, encoding='utf-8-sig').read().replace('cfg:DataProcessorObject.', 'cfg:ExternalDataProcessorObject.')
+open(fx, 'w', encoding='utf-8-sig').write(t)
+print('EXT OK ->', os.path.normpath(EXT))
