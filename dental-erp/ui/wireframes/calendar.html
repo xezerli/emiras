@@ -1,0 +1,45 @@
+<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Təqvim · DentaCore</title><link rel="stylesheet" href="wireframes.css">
+<style>
+.cal{display:grid;grid-template-columns:56px repeat(3,1fr);position:relative}
+.cal .h{padding:8px;font-weight:600;border-bottom:1px solid var(--md-outline-variant)}
+.cal .t{height:60px;font-size:11px;color:var(--md-outline);text-align:right;padding-right:8px;border-top:1px solid var(--md-outline-variant)}
+.cal .col{position:relative;border-left:1px solid var(--md-outline-variant);background:repeating-linear-gradient(to bottom,transparent 0 59px,var(--md-outline-variant) 59px 60px)}
+.appt{position:absolute;left:4px;right:4px;border-radius:12px;padding:6px 10px;font-size:12px;cursor:grab;overflow:hidden;border:1px solid transparent;transition:box-shadow var(--motion-fast)}
+.appt:hover{box-shadow:0 6px 18px rgba(0,0,0,.2)} .appt b{display:block}
+.s-booked{background:var(--md-secondary-container)} .s-conf{background:var(--md-primary-container)}
+.s-in{background:var(--md-success-container)} .s-noshow{background:var(--md-error-container);text-decoration:line-through}
+.off{position:absolute;left:0;right:0;background:repeating-linear-gradient(45deg,transparent 0 6px,var(--md-outline-variant) 6px 7px);opacity:.5}
+.now{position:absolute;left:0;right:0;border-top:2px solid var(--md-error);z-index:2}
+.side{display:grid;gap:16px}
+</style></head><body>
+<main id="app">
+  <h1>Təqvim <span class="sub">Çərşənbə axşamı, 7 oktyabr</span></h1>
+  <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="btn">＋ Yeni qəbul <span class="sub" style="color:inherit">(N)</span></button>
+    <button class="btn tonal">Gün</button><button class="btn outline">Həftə</button><button class="btn outline">Ay</button>
+    <span class="spacer"></span><span class="chip ok">● Canlı: dəyişikliklər avtomatik yenilənir</span></div>
+  <div class="grid" style="grid-template-columns:1fr 280px">
+    <div class="card" style="padding:0;overflow:auto"><div class="cal" role="grid" aria-label="Gündəlik təqvim">
+      <div class="h"></div><div class="h">Dr. Əliyeva · K1</div><div class="h">Dr. Həsənov · K2</div><div class="h">Dr. Quliyev · K3</div>
+      <div id="times"></div>
+      <div class="col" id="c1"></div><div class="col" id="c2"></div><div class="col" id="c3"></div></div></div>
+    <div class="side">
+      <div class="card"><h2>Gözləmə siyahısı</h2><p>Rəşad M. <span class="chip warn">təcili</span><br><span class="sub">diş ağrısı · istənilən saat</span></p>
+        <p>Leyla Ə.<br><span class="sub">həftə sonu, səhər</span></p></div>
+      <div class="card"><h2>Növbə (lobbi)</h2><p><b>#12</b> Aysel Q. <span class="chip">gözləyir 6 dəq</span></p><button class="btn tonal">Növbəti pasiyenti çağır</button></div>
+      <div class="note">Sürüklə-burax: vaxt/həkim dəyişir. Konflikt (409) olarsa blok geri qayıdır və toast göstərilir. «Rəngsiz zolaq» = həkimin iş saatı deyil.</div>
+    </div></div>
+</main>
+<script src="shared.js"></script><script>
+mountShell('Təqvim');
+const start=9, px=60, el=(id)=>document.getElementById(id);
+el('times').outerHTML='<div>'+Array.from({length:9},(_,i)=>`<div class="t">${String(start+i).padStart(2,'0')}:00</div>`).join('')+'</div>';
+const A=[[1,9,0,45,'Aysel Qasımova','Plomb 36','s-in'],[1,10,0,30,'Tural B.','Konsultasiya','s-conf'],[1,11,30,90,'Nigar H.','Kanal müalicəsi 46','s-booked'],
+ [2,9,30,120,'Orxan M.','İmplant 24','s-conf'],[2,12,0,30,'Samir Ə.','Yoxlama','s-noshow'],[2,14,0,60,'Günay R.','Çıxarılma 38','s-booked'],
+ [3,10,0,60,'Elnur V.','Peşəkar təmizlik','s-in'],[3,13,0,45,'Fidan T.','Ortodontiya nəzarət','s-booked']];
+A.forEach(([c,h,m,dur,n,p,cls])=>{const d=document.createElement('div');d.className='appt '+cls;d.draggable=true;d.tabIndex=0;
+ d.style.top=((h-start)*60+m)*px/60+'px';d.style.height=dur*px/60-2+'px';d.innerHTML=`<b>${n}</b>${p}`;el('c'+c).appendChild(d)});
+const off=document.createElement('div');off.className='off';off.style.top='0';off.style.height='60px';el('c3').appendChild(off);
+const now=document.createElement('div');now.className='now';now.style.top=(11.25-start)*px+'px';['c1','c2','c3'].forEach((id,i)=>i==0&&el(id).appendChild(now));
+</script></body></html>

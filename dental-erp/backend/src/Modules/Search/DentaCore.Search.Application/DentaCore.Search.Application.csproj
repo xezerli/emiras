@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../../BuildingBlocks/DentaCore.BuildingBlocks.Application/DentaCore.BuildingBlocks.Application.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DentaCore.Search.UnitTests" />
+  </ItemGroup>
+</Project>

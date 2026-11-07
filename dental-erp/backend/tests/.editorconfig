@@ -1,0 +1,3 @@
+[*.cs]
+# Test metodu adlarında underscore oxunaqlığa xidmət edir
+dotnet_diagnostic.CA1707.severity = none

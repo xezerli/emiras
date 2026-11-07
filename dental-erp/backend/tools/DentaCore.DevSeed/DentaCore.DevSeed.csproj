@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- Yalnız yerli/dev və e2e üçün alətdir; istehsalda işlədilmir, src/ arxitektura qaydalarına tabe deyil. -->
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Modules/Identity/DentaCore.Identity.Infrastructure/DentaCore.Identity.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

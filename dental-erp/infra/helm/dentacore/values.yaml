@@ -1,0 +1,111 @@
+# Xarici asılılıqlar (PostgreSQL, RabbitMQ, Redis, Elasticsearch) chart-a DAXİL DEYİL: idarə olunan xidmət və ya operator
+# (məs. CloudNativePG, RabbitMQ Cluster Operator) istifadə edin. Bağlantı sirləri `secrets.existingSecret`-dədir.
+global:
+  imageRegistry: ghcr.io/xezerli
+  imageTag: ""                  # boşdursa Chart.appVersion; istehsalda DIGEST ilə sancın (imageTag: "sha-<commit>")
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+tenancy:
+  baseDomain: dentacore.app     # klinika.dentacore.app → tenant "klinika"
+  fixedTenant: ""               # YALNIZ tək-klinika (Local Server) quraşdırmasında; cloud-da boş olmalıdır
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts: ["*.dentacore.app"]    # wildcard: hər klinika öz alt domenində. Wildcard TLS sertifikatı tələb olunur
+  tls: { secretName: dentacore-tls }
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 10m          # Gateway:MaxRequestBodyBytes
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"    # SignalR
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header X-Tenant "";
+
+# Bütün sirlər MÖVCUD bir Secret-dədir (External Secrets / Vault / Sealed Secrets ilə idarə olunur). Chart sirri yaratmır.
+secrets:
+  existingSecret: dentacore-secrets
+  # Gözlənilən açarlar: postgres-connection, rabbitmq-uri, pii-encryption-key, pii-hash-key, jwt-signing-key-pem, jwt-public-key-pem
+  # Könüllü: redis-connection, elasticsearch-uri
+
+observability:
+  otlpEndpoint: ""              # məs. http://otel-collector.observability:4317 ; boşdursa telemetriya söndürülüdür
+
+networkPolicy:
+  enabled: true
+  ingressControllerNamespace: ingress-nginx
+
+podSecurity:
+  runAsUser: 1654               # aspnet image-ində `app`
+  webRunAsUser: 1000            # node image-ində `node`
+
+# Hər servis: image adı, host layihəsi (ad üçün), replikalar, resurslar, hansı sirlər, HPA
+services:
+  identity-api:
+    image: identity-api
+    replicas: 2
+    secretRefs: [pg, pii, jwtsign, jwtpub]
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    hpa: { enabled: true, min: 2, max: 6, cpu: 70 }
+  clinic-core-api:
+    image: clinic-core-api
+    replicas: 2
+    secretRefs: [pg, pii, jwtpub, redis, es]
+    resources: { requests: { cpu: 200m, memory: 256Mi }, limits: { memory: 512Mi } }
+    hpa: { enabled: true, min: 2, max: 10, cpu: 70 }
+  billing-api:
+    image: billing-api
+    replicas: 2
+    secretRefs: [pg, pii, jwtpub]
+    resources: { requests: { cpu: 150m, memory: 192Mi }, limits: { memory: 384Mi } }
+    hpa: { enabled: true, min: 2, max: 8, cpu: 70 }
+  notify-api:
+    image: notify-api
+    replicas: 2                 # SignalR bağlantıları nüsxələr arasında bölünür; hər nüsxə RabbitMQ-dan hər mesajı alır (backplane lazım deyil)
+    secretRefs: [pg, jwtpub, rabbit]
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 512Mi } }
+    hpa: { enabled: false }
+  workers:
+    image: workers
+    replicas: 2                 # outbox FOR UPDATE SKIP LOCKED: bir neçə nüsxə təhlükəsizdir
+    port: 8080
+    noService: true
+    secretRefs: [pg, pii, rabbit, redis, es]
+    resources: { requests: { cpu: 150m, memory: 256Mi }, limits: { memory: 512Mi } }
+    hpa: { enabled: false }
+  gateway:
+    image: gateway
+    replicas: 2
+    secretRefs: []
+    ready: /health              # Gateway-in /health/ready-si yoxdur
+    resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 256Mi } }
+    hpa: { enabled: true, min: 2, max: 8, cpu: 70 }
+  web:
+    image: web
+    replicas: 2
+    port: 3000
+    runAsWeb: true
+    secretRefs: []
+    ready: /login
+    live: /login
+    resources: { requests: { cpu: 100m, memory: 192Mi }, limits: { memory: 384Mi } }
+    hpa: { enabled: true, min: 2, max: 6, cpu: 70 }
+
+migrations:
+  image: migrations
+  enabled: true                 # helm pre-install/pre-upgrade hook: db/migrate.sh up (irəli-yönlü, izlənən)
+  resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
+
+backup:
+  enabled: true
+  image: backup
+  schedule: "0 2 * * *"         # UTC
+  keepDays: 14
+  s3Uri: ""                     # məs. s3://dentacore-backups/prod ; boşdursa yalnız PVC
+  storage: { size: 50Gi, className: "" }
+  recipientsSecretKey: age-recipients      # `secrets.existingSecret`-dəki açar: age açıq açarları (vergüllə)
+  drill:
+    enabled: true
+    schedule: "0 5 * * 0"       # həftəlik
+    identitySecret: dentacore-restore-drill-key   # AYRI Secret, açar: identity (age gizli açarı). Bax docs/09 §8
+    adminUrlSecretKey: drill-admin-url            # `secrets.existingSecret`-dəki açar: bazaları yarada bilən bağlantı (postgres bazasına)

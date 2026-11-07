@@ -1,0 +1,27 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullname := include "dentacore.fullname" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullname }}
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts: {{- toYaml .Values.ingress.hosts | nindent 8 }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - { path: /v1, pathType: Prefix, backend: { service: { name: {{ $fullname }}-gateway, port: { number: 8080 } } } }
+          - { path: /hubs, pathType: Prefix, backend: { service: { name: {{ $fullname }}-gateway, port: { number: 8080 } } } }
+          - { path: /, pathType: Prefix, backend: { service: { name: {{ $fullname }}-web, port: { number: 3000 } } } }
+    {{- end }}
+{{- end }}

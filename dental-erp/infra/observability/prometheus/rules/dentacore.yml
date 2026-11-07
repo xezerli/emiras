@@ -1,0 +1,104 @@
+groups:
+  - name: dentacore-messaging
+    rules:
+      - alert: OutboxDeadLetters
+        expr: dentacore_outbox_dead > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Cəhd limiti aşılmış outbox mesajları var ({{ $value }})"
+          description: "Bu mesajlar öz-özünə göndərilmir. last_error-a baxın, səbəbi düzəldin, sonra attempts=0 edin. Runbook: docs/09-deployment.md §9."
+      - alert: OutboxBacklogAge
+        expr: dentacore_outbox_oldest_age_seconds > 120
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Ən köhnə göndərilməmiş hadisə {{ $value | humanizeDuration }} yaşındadır"
+          description: "Workers işləmir, broker əlçatmazdır və ya geriləmə var. Canlı bildirişlər, axtarış indeksi və xəbərdarlıqlar gecikir."
+      - alert: OutboxBacklogAgeCritical
+        expr: dentacore_outbox_oldest_age_seconds > 900
+        for: 5m
+        labels: { severity: critical }
+        annotations: { summary: "Outbox 15 dəqiqədən çox geridədir" }
+      - alert: OutboxPublisherStalled
+        expr: dentacore_outbox_pending > 0 and rate(dentacore_outbox_published_total[5m]) == 0
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Gözləyən mesaj var, amma 10 dəqiqədir heç biri göndərilmir"
+      - alert: OutboxPublishFailures
+        expr: rate(dentacore_outbox_publish_failures_total[5m]) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Broker-ə göndərmə xətaları davam edir" }
+      - alert: RabbitMqDeadLetterQueueNotEmpty
+        expr: sum by (queue) (rabbitmq_queue_messages_ready{queue=~".*\\.dlq"}) > 0
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "DLQ-da mesaj var: {{ $labels.queue }}"
+          description: "Consumer bu mesajları emal edə bilmədi (poison və ya davamlı xəta). Əl ilə baxın; itmir, amma emal olunmur."
+
+  - name: dentacore-database
+    rules:
+      - alert: PostgresLongRunningWriteTransaction
+        expr: pg_long_running_tx_oldest_write_seconds > 300
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "5 dəqiqədən uzun açıq YAZI tranzaksiyası ({{ $value | humanizeDuration }})"
+          description: "pg_snapshot_xmin horizontunu saxlayır: sync pull və axtarış indexer-i geridə qalır, VACUUM təmizləyə bilmir."
+      - alert: PostgresLongRunningWriteTransactionCritical
+        expr: pg_long_running_tx_oldest_write_seconds > 1800
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: "30 dəqiqədən uzun açıq yazı tranzaksiyası" }
+      - alert: PostgresIdleInTransactionWriters
+        expr: pg_long_running_tx_idle_in_tx > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Yazı edib commit etməyən sessiya var (tətbiq xətası ehtimalı)" }
+
+  - name: dentacore-http
+    rules:
+      - alert: HighServerErrorRatio
+        expr: |
+          sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+          / sum by (service_name) (rate(http_server_request_duration_seconds_count[5m])) > 0.02
+        for: 10m
+        labels: { severity: critical }
+        annotations: { summary: "{{ $labels.service_name }}: 5xx nisbəti 2%-dən yuxarı" }
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (le, service_name) (rate(http_server_request_duration_seconds_bucket{http_route!~"/hubs.*"}[5m]))) > 1
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "{{ $labels.service_name }}: p95 gecikmə 1 s-dən yuxarı" }
+      - alert: AuthFailureSpike
+        expr: sum(rate(http_server_request_duration_seconds_count{http_route="/v1/auth/login", http_response_status_code=~"401|429"}[5m])) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Giriş uğursuzluqları artıb (brute-force/credential stuffing ehtimalı)"
+
+  - name: dentacore-platform
+    rules:
+      - alert: ServiceTelemetryMissing
+        expr: absent_over_time(dentacore_outbox_pending[10m])
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Workers 10 dəqiqədir metrika göndərmir"
+          description: "Workers (outbox publisher) işləmir və ya OTel Collector əlçatmazdır."
+      - alert: BackupTooOld
+        expr: time() - kube_cronjob_status_last_successful_time{cronjob="dentacore-backup"} > 26 * 3600
+        for: 10m
+        labels: { severity: critical }
+        annotations:
+          summary: "Son uğurlu ehtiyat nüsxə 26 saatdan köhnədir"
+      - alert: RestoreDrillOverdue
+        expr: time() - kube_cronjob_status_last_successful_time{cronjob="dentacore-restore-drill"} > 8 * 24 * 3600
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Bərpa sınağı 8 gündən çoxdur uğurla işləməyib: yoxlanmamış ehtiyat nüsxə ehtiyat nüsxə sayılmaz"

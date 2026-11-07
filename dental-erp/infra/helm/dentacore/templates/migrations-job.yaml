@@ -1,0 +1,48 @@
+{{- if .Values.migrations.enabled }}
+{{- $fullname := include "dentacore.fullname" . }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Hər buraxılış üçün unikal ad: köhnə Job-un dəyişməz template-i ilə toqquşma olmasın
+  name: {{ $fullname }}-migrate-{{ .Release.Revision }}
+  labels: {{- include "dentacore.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1                 # uğursuz miqrasiyanı təkrar-təkrar cəhd etmə; əl ilə baxılsın
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {{- include "dentacore.selector" (dict "root" . "component" "migrations") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $fullname }}
+      automountServiceAccountToken: false
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: {{ include "dentacore.image" (dict "root" . "image" .Values.migrations.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args: ["up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: postgres-connection } }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources: {{- toYaml .Values.migrations.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }
+{{- end }}

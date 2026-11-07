@@ -1,0 +1,75 @@
+name: release
+
+# main-ə birləşmədə və v* teqində imic-lər qurulur, skan olunur, GHCR-ə göndərilir (SBOM + provenance). Deploy bu workflow-un işi DEYİL:
+# GitOps (Argo CD / Flux) və ya əl ilə `helm upgrade --set global.imageTag=sha-<commit>` (docs/09-deployment.md §5).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write          # keyless imzalama (cosign)
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: identity-api, file: backend.Dockerfile, args: "HOST=DentaCore.Identity.Api" }
+          - { name: clinic-core-api, file: backend.Dockerfile, args: "HOST=DentaCore.ClinicCore.Api" }
+          - { name: billing-api, file: backend.Dockerfile, args: "HOST=DentaCore.Billing.Api" }
+          - { name: notify-api, file: backend.Dockerfile, args: "HOST=DentaCore.Notify.Api" }
+          - { name: workers, file: backend.Dockerfile, args: "HOST=DentaCore.Workers" }
+          - { name: gateway, file: backend.Dockerfile, args: "HOST=DentaCore.Gateway" }
+          - { name: web, file: frontend.Dockerfile, args: "" }
+          - { name: migrations, file: migrate.Dockerfile, args: "" }
+          - { name: backup, file: backup.Dockerfile, args: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: "${{ github.actor }}", password: "${{ secrets.GITHUB_TOKEN }}" }
+      - name: Teqlər
+        id: meta
+        run: |
+          echo "tags=ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - name: Build (push etmədən, skan üçün)
+        uses: docker/build-push-action@v6
+        with:
+          context: dental-erp
+          file: dental-erp/infra/docker/${{ matrix.file }}
+          build-args: ${{ matrix.args }}
+          load: true
+          tags: scan:${{ matrix.name }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Trivy imic skanı (düzəldilə bilən HIGH/CRITICAL varsa dayanır)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.57.1 image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 scan:${{ matrix.name }}
+      - name: Push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: dental-erp
+          file: dental-erp/infra/docker/${{ matrix.file }}
+          build-args: ${{ matrix.args }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=${{ matrix.name }}
+      - uses: sigstore/cosign-installer@v3
+      - name: İmzala (keyless)
+        run: cosign sign --yes "ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}@${{ steps.push.outputs.digest }}"

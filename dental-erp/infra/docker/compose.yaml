@@ -1,0 +1,197 @@
+# Local Server / sınaq quraşdırması (tək klinika, tək maşın). Cloud-da Helm chart (infra/helm/dentacore) istifadə olunur.
+#
+#   ./init-secrets.sh                       # .env (təsadüfi sirlər, RSA açarı) yaradır; bir dəfə
+#   docker compose up -d --build            # hər şey: PG, RabbitMQ, Redis, ES, miqrasiya, 6 host, web, nginx
+#   docker compose run --rm migrate create-tenant klinika "Mənim Klinikam"     # ilk klinika (sonra DENTACORE_TENANT=klinika)
+#   docker compose --profile observability up -d                               # Prometheus + Grafana + OTel Collector
+#
+# Yalnız nginx (8080) xaricə açıqdır. Verilənlər bazası/broker/keş/Elasticsearch host portlarına BAĞLANMIR.
+name: dentacore
+
+x-backend: &backend
+  restart: unless-stopped
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  tmpfs: [/tmp]
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    rabbitmq: { condition: service_healthy }
+  environment: &backend-env
+    ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-dentacore};Username=${POSTGRES_USER:-dentacore};Password=${POSTGRES_PASSWORD:?run ./init-secrets.sh}
+    ConnectionStrings__Redis: redis:6379
+    RabbitMq__Uri: amqp://dentacore:${RABBITMQ_PASSWORD:?run ./init-secrets.sh}@rabbitmq:5672/
+    Elasticsearch__Uri: http://elasticsearch:9200
+    Security__PiiEncryptionKey: ${PII_ENCRYPTION_KEY:?run ./init-secrets.sh}
+    Security__PiiHashKey: ${PII_HASH_KEY:?run ./init-secrets.sh}
+    Jwt__PublicKeyPem: ${JWT_PUBLIC_KEY_PEM:?run ./init-secrets.sh}
+    Tenancy__FixedTenant: ${DENTACORE_TENANT:-}
+    Tenancy__AllowTenantHeader: "false"
+    Logging__Format: json
+    OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+
+services:
+  # ------------------------------------------------------------------ infrastruktur
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dentacore}
+      POSTGRES_USER: ${POSTGRES_USER:-dentacore}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./init-secrets.sh}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dentacore} -d ${POSTGRES_DB:-dentacore}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: dentacore
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?run ./init-secrets.sh}
+    volumes: [rabbitmq:/var/lib/rabbitmq]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]   # keşdir: itirilsə yenidən qurulur
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  elasticsearch:
+    image: elasticsearch:8.11.4
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"      # yalnız şəbəkədaxili; xaricə port açılmır
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes: [esdata:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health | grep -qv '\"status\":\"red\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+
+  # ------------------------------------------------------------------ miqrasiya (bir dəfəlik)
+  migrate:
+    image: postgres:16
+    entrypoint: ["/db/migrate.sh"]
+    command: ["up"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-dentacore}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-dentacore}
+    volumes: ["../../db:/db:ro"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ------------------------------------------------------------------ tətbiq
+  identity-api:
+    <<: *backend
+    build: { context: ../.., dockerfile: infra/docker/backend.Dockerfile, args: { HOST: DentaCore.Identity.Api } }
+    image: dentacore/identity-api:local
+    environment:
+      <<: *backend-env
+      Jwt__SigningKeyPem: ${JWT_SIGNING_KEY_PEM:?run ./init-secrets.sh}
+
+  clinic-core-api:
+    <<: *backend
+    build: { context: ../.., dockerfile: infra/docker/backend.Dockerfile, args: { HOST: DentaCore.ClinicCore.Api } }
+    image: dentacore/clinic-core-api:local
+
+  billing-api:
+    <<: *backend
+    build: { context: ../.., dockerfile: infra/docker/backend.Dockerfile, args: { HOST: DentaCore.Billing.Api } }
+    image: dentacore/billing-api:local
+
+  notify-api:
+    <<: *backend
+    build: { context: ../.., dockerfile: infra/docker/backend.Dockerfile, args: { HOST: DentaCore.Notify.Api } }
+    image: dentacore/notify-api:local
+
+  workers:
+    <<: *backend
+    build: { context: ../.., dockerfile: infra/docker/backend.Dockerfile, args: { HOST: DentaCore.Workers } }
+    image: dentacore/workers:local
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+
+  gateway:
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp]
+    build: { context: ../.., dockerfile: infra/docker/backend.Dockerfile, args: { HOST: DentaCore.Gateway } }
+    image: dentacore/gateway:local
+    environment:
+      Logging__Format: json
+      Gateway__TrustedProxies__0: 172.16.0.0/12      # compose şəbəkəsi: nginx-in ünvanı buradandır (X-Forwarded-* yalnız ondan qəbul olunur)
+    depends_on: [identity-api, clinic-core-api, billing-api, notify-api]
+
+  web:
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: [/tmp, /app/apps/web/.next/cache]
+    build: { context: ../.., dockerfile: infra/docker/frontend.Dockerfile }
+    image: dentacore/web:local
+    environment:
+      API_ORIGIN: http://gateway:8080       # BFF (login/refresh/logout) Identity-yə Gateway vasitəsilə çıxır
+    depends_on: [gateway]
+
+  # ------------------------------------------------------------------ giriş nöqtəsi
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports: ["${HTTP_PORT:-8080}:8080"]
+    volumes: ["./nginx.conf:/etc/nginx/conf.d/default.conf:ro"]
+    depends_on: [web, gateway]
+
+  # ------------------------------------------------------------------ müşahidə (profile: observability)
+  otel-collector:
+    profiles: [observability]
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes: ["../observability/otel/collector.yaml:/etc/otelcol/config.yaml:ro"]
+
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d"]
+    volumes:
+      - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - promdata:/prometheus
+
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:11.3.1
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?run ./init-secrets.sh}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:3001:3000"]
+
+volumes:
+  pgdata:
+  rabbitmq:
+  esdata:
+  promdata:
