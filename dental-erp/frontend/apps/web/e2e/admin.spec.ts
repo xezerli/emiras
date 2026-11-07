@@ -69,3 +69,47 @@ test("admin edits a role's permissions, they persist, and administrator roles st
   await expect(page.getByText("Bu rol dəyişdirilə bilməz")).toBeVisible();
   await expect(page.getByRole("button", { name: "Saxla" })).toHaveCount(0);
 });
+
+test("a user changes their own password: wrong current password is refused, then every session is closed", async ({ page }) => {
+  const email = `${unique("self")}@${TENANT}.test`;
+  const oldPassword = "Old-Passw0rd-e2e";
+  const newPassword = "New-Passw0rd-e2e";
+
+  await loginAndWaitForDashboard(page, "admin");
+  await page.goto("/users");
+  await page.getByRole("button", { name: "Yeni istifadəçi" }).click();
+  await page.getByLabel("E-poçt").fill(email);
+  await page.getByLabel("Ad Soyad").fill("Parol Dəyişən");
+  await page.getByLabel("İlkin parol").fill(oldPassword);
+  await page.getByLabel("Rol", { exact: true }).selectOption({ label: "Kassir" });
+  await page.getByRole("button", { name: "Yarat" }).click();
+  await expect(page.getByText("İstifadəçi yaradıldı.")).toBeVisible();
+
+  await page.context().clearCookies();
+  await page.goto("/login");
+  await page.getByLabel("E-poçt").fill(email);
+  await page.getByLabel("Parol").fill(oldPassword);
+  await page.getByRole("button", { name: "Daxil ol" }).click();
+  await page.getByRole("link", { name: /Hesabım/ }).click();
+  await expect(page.getByRole("heading", { name: "Hesabım", level: 1 })).toBeVisible();
+
+  await page.getByLabel("Cari parol").fill("Wrong-Passw0rd-1");
+  await page.getByLabel("Yeni parol", { exact: true }).fill(newPassword);
+  await page.getByLabel("Yeni parolu təkrar edin").fill(newPassword);
+  await page.getByRole("button", { name: "Parolu dəyiş" }).click();
+  await expect(page.getByText("Cari parol səhvdir.")).toBeVisible();
+
+  await page.getByLabel("Cari parol").fill(oldPassword);
+  await page.getByRole("button", { name: "Parolu dəyiş" }).click();
+  await expect(page.getByText("Parol dəyişdi")).toBeVisible();
+  await page.getByRole("button", { name: "Daxil ol" }).click();
+  await expect(page).toHaveURL(/\/login$/);
+
+  await page.getByLabel("E-poçt").fill(email);
+  await page.getByLabel("Parol").fill(oldPassword);
+  await page.getByRole("button", { name: "Daxil ol" }).click();
+  await expect(page.locator(".dc-alert--error")).toBeVisible();   // köhnə parol artıq işləmir
+  await page.getByLabel("Parol").fill(newPassword);
+  await page.getByRole("button", { name: "Daxil ol" }).click();
+  await expect(page.getByRole("navigation", { name: "Əsas naviqasiya" })).toBeVisible();
+});

@@ -10,6 +10,7 @@
 2. E-poçt və parolu yazın, **Daxil ol** düyməsini basın. Hər iki sahə dolmayana qədər düymə qeyri-aktivdir.
 3. Səhv parol halında ümumi mesaj görürsünüz ("E-poçt və ya parol yanlışdır"): sistem hansının səhv olduğunu qəsdən demir. Ardıcıl uğursuz cəhdlərdən sonra hesab müvəqqəti bloklanır ("Hesab müvəqqəti bloklanıb"): bir qədər gözləyin və ya rəhbərliyə müraciət edin.
 4. **Çıxış** düyməsi sessiyanı bu cihazda bağlayır. Ortaq kompüterdə işi bitirəndə həmişə çıxış edin.
+5. **Parolu dəyişmək:** yuxarıdakı adınıza basın (**Hesabım**), cari parolu və iki dəfə yeni parolu yazın (ən azı 10 simvol, hərf və rəqəm, cari paroldan fərqli). Dəyişəndən sonra bütün cihazlardakı sessiyalarınız bağlanır və yeni parolla yenidən daxil olursunuz. Cari parolu 5 dəfə səhv yazsanız hesab 15 dəqiqəlik bloklanır. Parolu unutmusunuzsa, idarəçi sizin üçün yenisini təyin edir (bax [§9](#9-rollar-və-istifadəçilərin-idarəsi-idarəçi-üçün)): özünüz sıfırlama (e-poçtla) hələ yoxdur.
 
 İki mərhələli doğrulama (2FA) olan hesablar üçün giriş ekranı hələ tamamlanmayıb: bu hesablarla daxil ola bilməzsiniz ([STATUS](../STATUS.md)).
 

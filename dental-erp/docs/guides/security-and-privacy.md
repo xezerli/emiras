@@ -25,6 +25,7 @@ PII açarları (`Security:PiiEncryptionKey`, `PiiHashKey`) **yalnız mühit dəy
 - **Brute-force:** Identity-də IP başına limit, hesabda ardıcıl uğursuzluqdan sonra müvəqqəti kilid (5 cəhd / 15 dəq), Gateway-də `/v1/auth/*` üçün ayrıca limit.
 - Hesab üzrə **IP icazə siyahısı** (`users.allowed_ips`) dəstəklənir.
 - **Brauzer (BFF):** refresh token yalnız `HttpOnly; SameSite=Strict; Path=/api/session` (+ prod-da `Secure`) cookie-dədir, ömrü 7 gün; access token **yalnız yaddaşdadır** (localStorage/sessionStorage-da JWT yoxdur: e2e yoxlayır). BFF route-ları **Origin yoxlayır** (cross-origin → 403, upstream çağırılmır).
+- **Öz parolunu dəyişmək** (`POST /v1/auth/change-password`): cari parol tələb olunur, yanlış cəhd giriş cəhdi sayılır (oğurlanmış access token ilə təxmin 5 cəhddən sonra hesabı bloklayır), uğurlu dəyişiklik bütün sessiyaları bağlayır, parol heç yerdə log/auditə düşmür. "Parolu unutdum" axını yoxdur: sıfırlamanı idarəçi edir.
 - Çıxış refresh token-i serverdə ləğv edir; ləğv olunmuş token işləmir (nümunə: [api-guide](api-guide.md) §2).
 
 ## 3. İcazə modeli

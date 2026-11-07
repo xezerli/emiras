@@ -38,6 +38,11 @@ export function passwordProblem(password: string): string | undefined {
   return undefined;
 }
 
+/** Öz parolunu dəyişərkən: cari paroldan fərqli olmalıdır (server də yoxlayır). */
+export function newPasswordProblem(next: string, current: string): string | undefined {
+  return passwordProblem(next) ?? (next === current ? "Yeni parol cari paroldan fərqli olmalıdır." : undefined);
+}
+
 /** Rolları seçilmiş koda görə yeniləyir: qalan rolların filialı saxlanır, yeni rollar bütün filiallara təyin olunur. */
 export function nextAssignments(current: readonly RoleAssignment[], selected: readonly string[]): RoleAssignment[] {
   return selected.map((role) => current.find((a) => a.role === role) ?? { role, branchId: null });
@@ -53,4 +58,10 @@ export const ADMIN_ERRORS: Record<string, string> = {
   "role.permission_not_assignable": "Bu icazə rola verilə bilməz.",
   "role.unknown_permission": "Naməlum icazə.",
   "validation.failed": "Daxil edilən məlumat düzgün deyil.",
+};
+
+export const ACCOUNT_ERRORS: Record<string, string> = {
+  "auth.current_password_incorrect": "Cari parol səhvdir.",
+  "auth.account_locked": "Çox sayda yanlış cəhd: hesab müvəqqəti bloklanıb. Bir qədər sonra yenidən cəhd edin.",
+  "validation.failed": "Yeni parol tələblərə uyğun deyil.",
 };

@@ -34,7 +34,7 @@ function Shell({ children }: { children: ReactNode }) {
       </nav>
       <div className="shell__main">
         <header className="shell__top">
-          <span>{user?.fullName}</span>
+          <Link href="/account" className="shell__user" aria-label={`Hesabım: ${user?.fullName ?? ""}`} aria-current={path.startsWith("/account") ? "page" : undefined}>{user?.fullName}</Link>
           <span style={{ display: "flex", gap: 8 }}>
             <ThemeToggle />
             <Button variant="outlined" onClick={() => void signOut()}>Çıxış</Button>

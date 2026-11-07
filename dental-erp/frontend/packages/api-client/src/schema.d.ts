@@ -72,6 +72,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/change-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Öz parolunu dəyiş. Cari parol tələb olunur (yanlış cəhd giriş kimi sayılır, 5-dən sonra hesab 15 dəq. bloklanır); bütün sessiyalar, o cümlədən cari, bağlanır */
+        post: operations["postAuthChangePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/me": {
         parameters: {
             query?: never;
@@ -2124,6 +2141,55 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    postAuthChangePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: password */
+                    currentPassword: string;
+                    /**
+                     * Format: password
+                     * @description Hərf və rəqəm daxil olmalı, cari paroldan fərqli olmalıdır
+                     */
+                    newPassword: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Parol dəyişdi */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Problem"];
+            /** @description auth.current_password_incorrect, zəif və ya eyni parol */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description auth.account_locked */
+            423: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };

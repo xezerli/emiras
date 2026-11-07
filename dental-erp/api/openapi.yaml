@@ -75,6 +75,19 @@ paths:
         required: true
         content: { application/json: { schema: { type: object, required: [refreshToken], properties: { refreshToken: { type: string } } } } }
       responses: { '204': { description: OK } }
+  /auth/change-password:
+    post:
+      operationId: postAuthChangePassword
+      tags: [Auth]
+      summary: Öz parolunu dəyiş. Cari parol tələb olunur (yanlış cəhd giriş kimi sayılır, 5-dən sonra hesab 15 dəq. bloklanır); bütün sessiyalar, o cümlədən cari, bağlanır
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [currentPassword, newPassword], properties: { currentPassword: { type: string, format: password }, newPassword: { type: string, format: password, minLength: 10, maxLength: 128, description: 'Hərf və rəqəm daxil olmalı, cari paroldan fərqli olmalıdır' } } } } }
+      responses:
+        '204': { description: Parol dəyişdi, bütün sessiyalar ləğv olundu }
+        '401': { $ref: '#/components/responses/Problem' }
+        '422': { description: 'auth.current_password_incorrect, zəif və ya eyni parol', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+        '423': { description: 'auth.account_locked', content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
   /auth/me:
     get:
       operationId: getAuthMe

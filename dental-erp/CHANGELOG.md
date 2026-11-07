@@ -8,9 +8,12 @@ Format: mərhələ üzrə. Versiya nömrəsi və buraxılış hələ yoxdur (`re
 - Kontraktdakı heç vaxt həyata keçməyən `/admin/users` `/users` ilə əvəz olundu.
 - Test: Identity inteqrasiya testləri paralel host-ların proses-geniş mühit dəyişənlərini qarışdırmasın deyə eyni xidmət kolleksiyasına salındı.
 
+## Öz parolunu dəyişmək
+- `POST /v1/auth/change-password` (cari parol tələb olunur; yanlış cəhd giriş cəhdi sayılır, 5-dən sonra bloklanır; bütün sessiyalar bağlanır; audit). Veb: `Hesabım` səhifəsi (adınızın üzərindən).
+
 ## Mərhələ 10: Sənədləşdirmə
 - İstifadəçi, API, developer və təhlükəsizlik bələdçiləri; STATUS; ADR-0001..0009.
-- API bələdçisinin nümunələri canlı stack-ə qarşı 81 yoxlama ilə sınanır (`tests/docs/api-guide-examples.sh`).
+- API bələdçisinin nümunələri canlı stack-ə qarşı 88 yoxlama ilə sınanır (`tests/docs/api-guide-examples.sh`).
 - Skrinşotlar real UI-dan alındı və tapılan qüsurlar düzəldildi: qrafik etiketləri, allergiya ağırlığı, ödəniş üsulu adı, keçid rəngləri.
 - Refresh cookie ömrü 7 günə (token ömrünə) uyğunlaşdırıldı.
 - `next` 16.4.3: 2 kritik və 1 yüksək advisory bağlandı.

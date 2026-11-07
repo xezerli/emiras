@@ -4,7 +4,7 @@ import { PaymentAttempt, parseAmount, recordPayment } from "@/features/billing/p
 import { actionsFor, dayRange, todayLocal } from "@/features/calendar/day";
 import { registerPatient } from "@/features/patients/register";
 import { findPatients } from "@/features/patients/search";
-import { HAS_LIMIT, nextAssignments, passwordProblem, toDraft, toGrants } from "@/features/users/admin";
+import { HAS_LIMIT, nextAssignments, newPasswordProblem, passwordProblem, toDraft, toGrants } from "@/features/users/admin";
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -153,5 +153,11 @@ describe("user administration helpers", () => {
     ]);
     draft[HAS_LIMIT] = { scope: "tenant", maxAmount: "" };
     expect(toGrants(draft)[0]).toEqual({ permission: HAS_LIMIT, scope: "tenant", maxAmount: null });
+  });
+
+  it("requires a new password that meets the policy and differs from the current one", () => {
+    expect(newPasswordProblem("short1", "Old-Passw0rd-x")).toMatch(/10/);
+    expect(newPasswordProblem("Old-Passw0rd-x", "Old-Passw0rd-x")).toMatch(/fərqli/);
+    expect(newPasswordProblem("New-Passw0rd-y", "Old-Passw0rd-x")).toBeUndefined();
   });
 });

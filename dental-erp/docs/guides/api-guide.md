@@ -354,6 +354,17 @@ curl "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $DOCTOR_TO
 
 İkinci sorğu `403 permission.denied` qaytarır: həkimin `user:manage` icazəsi yoxdur.
 
+### Öz parolunu dəyişmək
+
+Hər daxil olmuş istifadəçi öz parolunu dəyişə bilər (xüsusi icazə lazım deyil). **Cari parol tələb olunur**:
+
+```bash
+curl -X POST "$API/v1/auth/change-password" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $SELF_TOKEN" -H "Content-Type: application/json" -d '{"currentPassword":"yanlis-parol-1","newPassword":"Sonuncu-Parol-2026"}'
+curl -X POST "$API/v1/auth/change-password" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $SELF_TOKEN" -H "Content-Type: application/json" -d '{"currentPassword":"Yeni-Parol-2026","newPassword":"Sonuncu-Parol-2026"}'
+```
+
+Birinci sorğu `422 auth.current_password_incorrect` qaytarır (`401` yox: token düzgündür, klient token yeniləməyə çalışmamalıdır). **Yanlış cari parol giriş cəhdi sayılır**: oğurlanmış access token ilə parolu təxmin etmək 5 cəhddən sonra hesabı 15 dəqiqəlik bloklayır (`423 auth.account_locked`). Yeni parol ≥10 simvol, hərf və rəqəm olmalı və cariyə bərabər olmamalıdır (`422`). Uğurlu dəyişiklik `204` qaytarır və istifadəçinin **bütün sessiyalarını, o cümlədən cari olanı, bağlayır**: yeni parolla yenidən daxil olun (köhnə parol `401` alır). Əməliyyat auditə `user.password.change` kimi yazılır, parol heç yerdə saxlanmır.
+
 ## 7. Xəta kodları
 
 Xəta cavabı həmişə `application/problem+json`-dur; `code` sabitdir və klientin məntiqi buna əsaslanmalıdır (`title` dəyişə bilər). Əsas kodlar:

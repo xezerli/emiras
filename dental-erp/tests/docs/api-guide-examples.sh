@@ -209,6 +209,24 @@ expect role.protected "$(field 'd["code"]')" "role.protected"
 curl "$API/v1/users" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $DOCTOR_TOKEN"
 expect 403 "$(status)" "həkim istifadəçiləri idarə edə bilməz"
 
+# ---------- 6c. Öz parolunu dəyişmək ----------
+curl -X POST "$API/v1/auth/login" -H "X-Tenant: $TENANT" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"password\":\"Yeni-Parol-2026\"}"
+expect 403 "$(status)" "söndürülmüş hesab hələ girə bilmir"
+curl -X POST "$API/v1/users/$NEWID/enable" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $TOKEN"
+expect 200 "$(status)" "hesab yenidən açıldı"
+curl -X POST "$API/v1/auth/login" -H "X-Tenant: $TENANT" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"password\":\"Yeni-Parol-2026\"}"
+expect 200 "$(status)" "açılmış hesab girir"
+SELF_TOKEN="$(field 'd["accessToken"]')"
+
+curl -X POST "$API/v1/auth/change-password" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $SELF_TOKEN" -H "Content-Type: application/json" -d '{"currentPassword":"yanlis-parol-1","newPassword":"Sonuncu-Parol-2026"}'
+expect 422 "$(status)" "yanlış cari parol: 422"
+expect auth.current_password_incorrect "$(field 'd["code"]')" "auth.current_password_incorrect"
+
+curl -X POST "$API/v1/auth/change-password" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $SELF_TOKEN" -H "Content-Type: application/json" -d '{"currentPassword":"Yeni-Parol-2026","newPassword":"Sonuncu-Parol-2026"}'
+expect 204 "$(status)" "parol dəyişdi"
+curl -X POST "$API/v1/auth/login" -H "X-Tenant: $TENANT" -H "Content-Type: application/json" -d "{\"email\":\"$NEWMAIL\",\"password\":\"Yeni-Parol-2026\"}"
+expect 401 "$(status)" "köhnə parol artıq işləmir"
+
 # ---------- 7. İcazə: həkim maliyyə əməliyyatı edə bilməz ----------
 curl -X POST "$API/v1/invoices/$INVOICE/payments" -H "X-Tenant: $TENANT" -H "Authorization: Bearer $DOCTOR_TOKEN" -H "Content-Type: application/json" -H "Idempotency-Key: $(uuid)" -d '{"method":"card","amount":5}'
 expect 403 "$(status)" "icazəsiz rol: 403"

@@ -59,6 +59,10 @@ auth.MapPost("/logout", async (RefreshRequest body, ISender sender, Cancellation
     return result.ToHttpResult(_ => Results.NoContent());
 }).RequireAuthorization();
 
+auth.MapPost("/change-password", async (ChangePasswordRequest body, ISender sender, CancellationToken ct) =>
+    (await sender.Send(new ChangeOwnPasswordCommand(body.CurrentPassword, body.NewPassword), ct)).ToHttpResult(_ => Results.NoContent()))
+    .RequireAuthorization();
+
 auth.MapGet("/me", async (ClaimsPrincipal user, ISender sender, CancellationToken ct) =>
 {
     if (!Guid.TryParse(user.FindFirstValue("sub"), out var userId))
@@ -118,6 +122,8 @@ internal sealed record LoginRequest(string Email, string Password, Guid? DeviceI
 internal sealed record RefreshRequest(string RefreshToken);
 
 internal sealed record CreateUserRequest(string Email, string FullName, string Password, IReadOnlyList<RoleAssignment>? Roles);
+
+internal sealed record ChangePasswordRequest(string CurrentPassword, string NewPassword);
 
 internal sealed record RenameUserRequest(string FullName);
 

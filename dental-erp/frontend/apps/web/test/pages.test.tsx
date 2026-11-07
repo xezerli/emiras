@@ -462,3 +462,54 @@ describe("user administration pages", async () => {
     expect(await screen.findByText("İdarəçi rolları dəyişdirilə bilməz.")).toBeInTheDocument();
   });
 });
+
+describe("account page", async () => {
+  const { default: AccountPage } = await import("@/app/(app)/account/page");
+  const fill = async (current: string, next: string, repeat: string) => {
+    await userEvent.type(screen.getByLabelText("Cari parol"), current);
+    await userEvent.type(screen.getByLabelText("Yeni parol", { exact: true }), next);
+    await userEvent.type(screen.getByLabelText("Yeni parolu təkrar edin"), repeat);
+  };
+
+  it("keeps the button disabled for weak, identical or mismatching passwords", async () => {
+    perms = [];
+    renderWithQuery(<AccountPage />);
+    const button = screen.getByRole("button", { name: "Parolu dəyiş" });
+    await fill("Old-Passw0rd-x", "short1", "short1");
+    expect(button).toBeDisabled();
+    expect(screen.getByText("Parol ən azı 10 simvol olmalıdır.")).toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText("Yeni parol", { exact: true }));
+    await userEvent.type(screen.getByLabelText("Yeni parol", { exact: true }), "New-Passw0rd-y");
+    expect(screen.getByText("Parollar eyni deyil.")).toBeInTheDocument();
+    expect(button).toBeDisabled();
+    await userEvent.clear(screen.getByLabelText("Yeni parolu təkrar edin"));
+    await userEvent.type(screen.getByLabelText("Yeni parolu təkrar edin"), "New-Passw0rd-y");
+    expect(button).toBeEnabled();
+  });
+
+  it("maps a wrong current password and a lockout without leaking server text", async () => {
+    perms = [];
+    let code = "auth.current_password_incorrect";
+    handler = () => json(code === "auth.account_locked" ? 423 : 422, { code, detail: "internal detail" });
+    renderWithQuery(<AccountPage />);
+    await fill("Wrong-Passw0rd-1", "New-Passw0rd-y", "New-Passw0rd-y");
+    await userEvent.click(screen.getByRole("button", { name: "Parolu dəyiş" }));
+    expect(await screen.findByText("Cari parol səhvdir.")).toBeInTheDocument();
+    code = "auth.account_locked";
+    await userEvent.click(screen.getByRole("button", { name: "Parolu dəyiş" }));
+    expect(await screen.findByText(/hesab müvəqqəti bloklanıb/)).toBeInTheDocument();
+    expect(screen.queryByText(/internal detail/)).not.toBeInTheDocument();
+  });
+
+  it("sends both passwords and asks the user to sign in again on success", async () => {
+    perms = [];
+    handler = () => new Response(null, { status: 204 });
+    renderWithQuery(<AccountPage />);
+    await fill("Old-Passw0rd-x", "New-Passw0rd-y", "New-Passw0rd-y");
+    await userEvent.click(screen.getByRole("button", { name: "Parolu dəyiş" }));
+    expect(await screen.findByText("Parol dəyişdi")).toBeInTheDocument();
+    expect(await calls.find((c) => c.method === "POST" && path(c) === "/auth/change-password")!.json()).toEqual({ currentPassword: "Old-Passw0rd-x", newPassword: "New-Passw0rd-y" });
+    expect(screen.getByRole("button", { name: "Daxil ol" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Cari parol")).not.toBeInTheDocument();
+  });
+});

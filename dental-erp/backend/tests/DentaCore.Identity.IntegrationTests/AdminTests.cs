@@ -383,4 +383,52 @@ public sealed class AdminTests : IClassFixture<PostgresFixture>, IDisposable
         var jwt = new JsonWebTokenHandler().ReadJsonWebToken((await LoginAsync(email, StrongPassword)).Access);
         Assert.Equal([branch.ToString()], jwt.Claims.Where(c => c.Type == "branch").Select(c => c.Value));
     }
+
+    [IntegrationFact]
+    public async Task Changing_your_own_password_needs_the_current_one_revokes_sessions_and_is_audited()
+    {
+        var email = NewEmail();
+        var id = await _db.SeedUserAsync("t_demo", email, "Öz Parolu", "reception");
+        var (access, refresh) = await LoginAsync(email);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await SendAsync(HttpMethod.Post, "/v1/auth/change-password", null, new { currentPassword = PostgresFixture.Password, newPassword = "Brand-New-Passw0rd" })).StatusCode);
+
+        var wrong = await SendAsync(HttpMethod.Post, "/v1/auth/change-password", access, new { currentPassword = "yanlis-parol-1", newPassword = "Brand-New-Passw0rd" });
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, wrong.StatusCode);
+        Assert.Equal("auth.current_password_incorrect", Code(await JsonAsync(wrong)));
+        Assert.Equal(1, await _db.ScalarAsync<int>("t_demo", "SELECT failed_logins FROM users WHERE id = $1", id));
+
+        foreach (var (current, next) in new[] { (PostgresFixture.Password, "short1"), (PostgresFixture.Password, PostgresFixture.Password) })
+        {
+            var rejected = await SendAsync(HttpMethod.Post, "/v1/auth/change-password", access, new { currentPassword = current, newPassword = next });
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, rejected.StatusCode);
+        }
+
+        var changed = await SendAsync(HttpMethod.Post, "/v1/auth/change-password", access, new { currentPassword = PostgresFixture.Password, newPassword = "Brand-New-Passw0rd" });
+
+        Assert.Equal(HttpStatusCode.NoContent, changed.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _client.PostAsJsonAsync("/v1/auth/login", new { email, password = PostgresFixture.Password })).StatusCode);
+        await LoginAsync(email, "Brand-New-Passw0rd");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _client.PostAsJsonAsync("/v1/auth/refresh", new { refreshToken = refresh })).StatusCode);
+        Assert.Equal(1, await _db.ScalarAsync<long>("t_demo", "SELECT count(*) FROM audit_log WHERE action = 'user.password.change' AND user_id = $1", id));
+        var details = await _db.ScalarAsync<string>("t_demo", "SELECT coalesce(string_agg(after_data::text, ' '), '') FROM audit_log WHERE action = 'user.password.change'");
+        Assert.DoesNotContain("Brand-New-Passw0rd", details, StringComparison.Ordinal);
+    }
+
+    [IntegrationFact]
+    public async Task Guessing_the_current_password_with_a_stolen_token_locks_the_account()
+    {
+        var email = NewEmail();
+        await _db.SeedUserAsync("t_demo", email, "Oğurlanmış Token", "reception");
+        var (access, _) = await LoginAsync(email);
+
+        for (var i = 0; i < 5; i++)
+        {
+            await SendAsync(HttpMethod.Post, "/v1/auth/change-password", access, new { currentPassword = $"guess-number-{i}", newPassword = "Brand-New-Passw0rd" });
+        }
+
+        var locked = await SendAsync(HttpMethod.Post, "/v1/auth/change-password", access, new { currentPassword = PostgresFixture.Password, newPassword = "Brand-New-Passw0rd" });
+        Assert.Equal(HttpStatusCode.Locked, locked.StatusCode);
+        Assert.Equal(HttpStatusCode.Locked, (await _client.PostAsJsonAsync("/v1/auth/login", new { email, password = PostgresFixture.Password })).StatusCode);
+    }
 }
