@@ -2165,7 +2165,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Parol dəyişdi */
+            /** @description Parol dəyişdi, bütün sessiyalar ləğv olundu */
             204: {
                 headers: {
                     [name: string]: unknown;
